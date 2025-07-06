@@ -1,0 +1,3 @@
+[key_value_store.stations]
+type = "spin"
+path = ".spin/stations.db"

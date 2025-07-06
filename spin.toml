@@ -1,0 +1,31 @@
+spin_manifest_version = 2
+
+[application]
+name = "wasserspiegel"
+version = "0.1.0"
+authors = ["Timo Sulg <timgluz@gmail.com>"]
+description = "TRML plugin for Wasserspiegel"
+
+[[trigger.http]]
+route = "/..."
+component = "wasserspiegel"
+
+[[trigger.http]]
+route = "/stations/..."
+component = "stations"
+
+
+[component.wasserspiegel]
+source = "main.wasm"
+allowed_outbound_hosts = []
+[component.wasserspiegel.build]
+command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
+watch = ["**/main.go", "go.mod"]
+
+[component.stations]
+source = "stations.wasm"
+key_value_stores = ["stations"]
+allowed_outbound_hosts = ["https://www.pegelonline.wsv.de"]
+[component.stations.build]
+command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o stations.wasm stations.go"
+watch = ["stations.go", "station/**/*.go", "go.mod"]

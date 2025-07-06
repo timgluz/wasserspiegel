@@ -1,0 +1,33 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  GREETING: Hello, World!
+
+tasks:
+  default:
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+  deps:
+    cmds:
+      - echo "Installing dependencies..."
+      - go mod tidy
+  build:
+    cmds:
+      - task: deps
+      - echo "Building the project..."
+      - spin build
+    silent: true
+
+  up:
+    aliases:
+      - run
+    preconditions:
+      - sh: "test -f runtime-config.toml"
+        msg: "runtime-config.toml file is required to run this task."
+    cmds:
+      - echo "Starting the application..."
+      - spin up --runtime-config-file runtime-config.toml
+    silent: true
