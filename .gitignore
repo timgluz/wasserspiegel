@@ -1,2 +1,5 @@
 *.wasm
 .spin/
+data/
+node_modules/
+

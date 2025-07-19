@@ -14,7 +14,7 @@ import (
 
 const (
 	JSONContentType = "application/json"
-
+	HTMLContentType = "text/html"
 	// PegelOnlineBaseURL is the base URL for the PegelOnline API.
 	PegelOnlineBaseURL = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"
 )
@@ -77,6 +77,11 @@ func (s *stationAppComponent) IsReady() bool {
 
 	s.logger.Info("Station app component is ready")
 	return true
+}
+
+type StationDashboard struct {
+	Station    *station.Station              `json:"station"`
+	WaterLevel *station.WaterLevelCollection `json:"water_level"`
 }
 
 func init() {
@@ -172,11 +177,11 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
 		logger := appComponents.logger
 		stationID := params.ByName("id")
-		logger.Debug("Fetching station by ID", "id", stationID)
 		if stationID == "" {
 			renderError(w, ErrNotFound, http.StatusNotFound)
 		}
 
+		logger.Debug("Fetching station by ID", "id", stationID)
 		station, err := fetchCachedStationByID(appComponents, stationID)
 		if err != nil {
 			logger.Error("Failed to fetch station by ID", "id", stationID, "error", err)
@@ -190,15 +195,31 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 			return
 		}
 
-		jsonData, err := json.Marshal(station)
+		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, stationID)
 		if err != nil {
-			logger.Error("Failed to marshal station data", "id", stationID, "error", err)
-			renderFatal(w, ErrFailedToMarshal)
+			logger.Error("Failed to fetch water levels for station", "id", stationID, "error", err)
+			renderFatal(w, err)
 			return
 		}
 
-		renderSuccess(w, jsonData)
+		stationDashboard := &StationDashboard{
+			Station:    station,
+			WaterLevel: waterLevelCollection,
+		}
+
+		renderJSONResponse(w, stationDashboard)
 	}
+}
+func renderJSONResponse(w http.ResponseWriter, data interface{}) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		renderFatal(w, fmt.Errorf("failed to marshal data: %w", err))
+		return
+	}
+
+	w.Header().Set("Content-Type", JSONContentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jsonData)
 }
 
 func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
@@ -327,6 +348,16 @@ func fetchCachedWaterLevels(appComponents *stationAppComponent, stationID string
 		logger.Warn("No water levels found for station", "id", stationID)
 		return nil, fmt.Errorf("no water levels found for station with ID: %s", stationID)
 	}
+
+	// augment water level with latest measurement and unit
+	waterLevelCollection.Unit = station.UnitCM // Default unit for water level measurements
+	if len(waterLevelCollection.Measurements) > 0 {
+		waterLevelCollection.Latest = waterLevelCollection.Measurements[len(waterLevelCollection.Measurements)-1]
+	} else {
+		logger.Warn("No measurements found for station", "id", stationID)
+	}
+
+	// TODO: cache water level collection in repository
 
 	logger.Debug("Successfully fetched water levels for station", "id", stationID, "count", len(waterLevelCollection.Measurements))
 	return waterLevelCollection, nil

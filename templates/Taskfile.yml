@@ -1,0 +1,34 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  STATION_ENDPOINT: "127.0.0.1:3000/stations"
+  STATION_ID: "57090802-c51a-4d09-8340-b4453cd0e1f5"
+
+tasks:
+  deps:
+    cmds:
+      - echo "Installing dependencies..."
+      - npm install
+  data:
+    cmds:
+      - echo "Fetching station data..."
+      - curl -s "{{.STATION_ENDPOINT}}/{{.STATION_ID}}" -o data/station.json
+  render:
+    cmds:
+      - echo "Rendering static files..."
+      - npx liquidjs --template @./templates/station.liquid --context @./data/station.json --output ./static/station.html
+    preconditions:
+      - sh: "test -f ./data/station.json"
+        msg: "data/station.json file is required to render the template, run `task data` to download all required example data."
+
+  serve:
+    cmds:
+      - task: deps
+      - echo "Starting the server..."
+      - npx http-server ./static -p 8080
+    silent: true
+    preconditions:
+      - sh: "test -f static/station.html"
+        msg: "station.html file is required to serve the application, run `task render` to generate it."

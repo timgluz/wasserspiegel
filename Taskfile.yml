@@ -2,6 +2,9 @@
 
 version: "3"
 
+includes:
+  template: ./templates/Taskfile.yml
+
 vars:
   GREETING: Hello, World!
 

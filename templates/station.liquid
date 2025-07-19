@@ -1,0 +1,210 @@
+{% layout './templates/trmnl-layout.liquid' %}
+{% block content %}
+
+<div class="layout layout--col gap--space-between">
+  <div class="grid">
+    <div class="row">
+      <div class="grid">
+        <div class="item col--span-2">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--medium value--tnums"
+              data-value-type="string"
+            >
+              {{ station.longname }}
+            </span>
+            <span class="label">{{ station.water.longname }}</span>
+          </div>
+        </div>
+
+        <div class="item col--span-1">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--xsmall value--tnums"
+              data-value-type="date"
+              style="white-space: nowrap"
+            >
+              {{ water_level.latest.value | append: 'cm' }}
+            </span>
+            <span class="label">water level</span>
+          </div>
+        </div>
+
+        <div class="item col--span-1">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--xsmall value--tnums"
+              data-value-type="date"
+            >
+              <div
+                class="w--14 h--1.5 mb--2 bg--black"
+                style="border-radius: 20px"
+              ></div>
+              -10.0 cm
+            </span>
+            <span class="label">change(1d)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="border--h-5 w--full"></div>
+
+  <div class="grid">
+    <div class="row">
+      <div class="grid">
+        <div class="item col--span-2">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--tnums"
+              data-value-type="date"
+              style="white-space: nowrap"
+            >
+              {{ station.km | append: ' km' }}
+            </span>
+            <span class="label">from source</span>
+          </div>
+        </div>
+
+        <div class="item col--span-1">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--small value--tnums"
+              data-value-type="number"
+              style="white-space: nowrap"
+            >
+              10 m3/s
+            </span>
+            <span class="label">water flow</span>
+          </div>
+        </div>
+
+        <div class="item col--span-1">
+          <div class="meta"></div>
+          <div class="content">
+            <span
+              class="value value--xsmall value--tnums"
+              data-value-type="date"
+            >
+              <div class="w--14 h--1.5 mb--2 bg--gray-5"></div>
+              + 10.0 m3/s
+            </span>
+            <span class="label">flow change(1d)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.highcharts.com/highcharts.js"></script>
+  <script src="https://code.highcharts.com/highcharts-more.js"></script>
+  <script src="https://code.highcharts.com/modules/pattern-fill.js"></script>
+
+  <div
+    id="chart-8513af80da0f"
+    class="w--full"
+    data-highcharts-chart="0"
+    style="overflow: hidden"
+  ></div>
+
+  <script type="text/javascript">
+    var data = [
+      {
+        name: 'last 10 days',
+        data: [
+        {% for measurement in water_level.measurements %}
+            [{{ measurement.timestamp }} , {{ measurement.value }}],
+        {% endfor %}
+        ],
+      },
+    ];
+
+    Highcharts.chart('chart-8513af80da0f', {
+      chart: {
+        type: 'spline',
+        height: 203,
+        width: null,
+        animation: false,
+        spacing: [10, 10, 5, 10],
+      },
+      title: {
+        text: null,
+      },
+      plotOptions: {
+        series: {
+          animation: false,
+          enableMouseTracking: false,
+          states: {
+            hover: { enabled: false },
+          },
+          marker: {
+            enabled: false,
+          },
+        },
+      },
+      series: [
+        {
+          data: data[0].data,
+          lineWidth: 4,
+          color: '#000000',
+          name: data[0].name,
+          zIndex: 2,
+        },
+      ],
+      tooltip: { enabled: false },
+      legend: { enabled: false },
+      yAxis: {
+        labels: {
+          style: { fontSize: '16px', color: '#000000' },
+        },
+        gridLineDashStyle: 'shortdot',
+        gridLineWidth: 1,
+        gridLineColor: '#000000',
+        tickAmount: 5,
+        title: {
+          text: null,
+        },
+      },
+      xAxis: {
+        type: 'datetime',
+        labels: {
+          style: { fontSize: '16px', color: '#000000' },
+          padding: 5,
+          y: 25,
+        },
+        lineWidth: 0,
+        gridLineDashStyle: 'dot',
+        tickWidth: 1,
+        tickLength: 0,
+        gridLineWidth: 1,
+        gridLineColor: '#000000',
+        tickPixelInterval: 120,
+        offset: 0,
+        margin: 0,
+        title: {
+          text: null,
+        },
+      },
+      credits: {
+        enabled: false,
+      },
+    });
+  </script>
+</div>
+
+<div class="title_bar">
+  <img
+    class="image"
+    src="https://usetrmnl.com/images/plugins/trmnl--render.svg"
+  >
+  <span class="title">{{ trmnl.plugin_settings.instance_name }}</span>
+  <span class="instance">Description</span>
+</div>
+
+{% endblock content %}
