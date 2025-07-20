@@ -14,7 +14,13 @@ tasks:
   data:
     cmds:
       - echo "Fetching station data..."
-      - curl -s "{{.STATION_ENDPOINT}}/{{.STATION_ID}}" -o data/station.json
+      - 'curl -s -H "Authorization: Bearer {{.SPIN_VARIABLE_API_KEY}}" "{{.STATION_ENDPOINT}}/{{.STATION_ID}}" -o data/station.json'
+    silent: true
+    requires:
+      vars: [SPIN_VARIABLE_API_KEY]
+    preconditions:
+      - sh: "test -d data"
+        msg: "data directory is required to store the fetched station data."
   render:
     cmds:
       - echo "Rendering static files..."

@@ -22,13 +22,13 @@
           <div class="meta"></div>
           <div class="content">
             <span
-              class="value value--xsmall value--tnums"
-              data-value-type="date"
+              class="value value--small value--tnums"
+              data-value-format="true"
               style="white-space: nowrap"
             >
-              {{ water_level.latest.value | append: 'cm' }}
+              {{ station.km }}
             </span>
-            <span class="label">water level</span>
+            <span class="label">KM from source</span>
           </div>
         </div>
 
@@ -36,16 +36,16 @@
           <div class="meta"></div>
           <div class="content">
             <span
-              class="value value--xsmall value--tnums"
-              data-value-type="date"
+              class="value value--small value--tnums"
+              data-value-format="true"
             >
               <div
                 class="w--14 h--1.5 mb--2 bg--black"
                 style="border-radius: 20px"
               ></div>
-              -10.0 cm
+              80
             </span>
-            <span class="label">change(1d)</span>
+            <span class="label">from sealevel</span>
           </div>
         </div>
       </div>
@@ -62,12 +62,13 @@
           <div class="content">
             <span
               class="value value--tnums"
-              data-value-type="date"
+              data-value-type="number"
+              data-value-format="true"
               style="white-space: nowrap"
             >
-              {{ station.km | append: ' km' }}
+              {{ water_level.latest.value }}
             </span>
-            <span class="label">from source</span>
+            <span class="label">cm, current level</span>
           </div>
         </div>
 
@@ -77,11 +78,12 @@
             <span
               class="value value--small value--tnums"
               data-value-type="number"
+              data-value-format="true"
               style="white-space: nowrap"
             >
-              10 m3/s
+              {{ water_level.trend.p1d.value }}
             </span>
-            <span class="label">water flow</span>
+            <span class="label">cm, 1day change</span>
           </div>
         </div>
 
@@ -90,12 +92,13 @@
           <div class="content">
             <span
               class="value value--xsmall value--tnums"
-              data-value-type="date"
+              data-value-type="number"
+              data-value-format="true"
             >
               <div class="w--14 h--1.5 mb--2 bg--gray-5"></div>
-              + 10.0 m3/s
+              {{ water_level.trend.p3d.value }}
             </span>
-            <span class="label">flow change(1d)</span>
+            <span class="label">cm, 3day change</span>
           </div>
         </div>
       </div>
@@ -119,7 +122,7 @@
         name: 'last 10 days',
         data: [
         {% for measurement in water_level.measurements %}
-            [{{ measurement.timestamp }} , {{ measurement.value }}],
+            ["{{ measurement.timestamp }}" , {{ measurement.value }}],
         {% endfor %}
         ],
       },
@@ -198,13 +201,5 @@
   </script>
 </div>
 
-<div class="title_bar">
-  <img
-    class="image"
-    src="https://usetrmnl.com/images/plugins/trmnl--render.svg"
-  >
-  <span class="title">{{ trmnl.plugin_settings.instance_name }}</span>
-  <span class="instance">Description</span>
-</div>
-
+{% render './templates/title_bar.liquid', title: station.longname, description: 'Wasserspiegel' %}
 {% endblock content %}

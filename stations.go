@@ -425,10 +425,9 @@ func fetchCachedWaterLevels(appComponents *stationAppComponent, stationID string
 
 	// augment water level with latest measurement and unit
 	waterLevelCollection.Unit = station.UnitCM // Default unit for water level measurements
-	if len(waterLevelCollection.Measurements) > 0 {
-		waterLevelCollection.Latest = waterLevelCollection.Measurements[len(waterLevelCollection.Measurements)-1]
-	} else {
-		logger.Warn("No measurements found for station", "id", stationID)
+	waterLevelCollection.Latest = waterLevelCollection.GetLatestMeasurement()
+	if err := waterLevelCollection.CalculateTrends(waterLevelCollection.Measurements); err != nil {
+		logger.Error("Failed to calculate trends for water levels", "id", stationID, "error", err)
 	}
 
 	// TODO: cache water level collection in repository
