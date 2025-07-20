@@ -6,6 +6,11 @@ version = "0.1.0"
 authors = ["Timo Sulg <timgluz@gmail.com>"]
 description = "TRML plugin for Wasserspiegel"
 
+[variables]
+api_key = { required = true }
+pegelonline_api_url = { default = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"}
+stations_store_name = { default = "stations" }
+
 [[trigger.http]]
 route = "/..."
 component = "wasserspiegel"
@@ -29,3 +34,7 @@ allowed_outbound_hosts = ["https://www.pegelonline.wsv.de"]
 [component.stations.build]
 command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o stations.wasm stations.go"
 watch = ["stations.go", "station/**/*.go", "go.mod"]
+[component.stations.variables]
+api_key = "{{ api_key }}"
+base_url = "{{ pegelonline_api_url }}"
+store_name = "{{ stations_store_name }}"

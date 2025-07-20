@@ -8,6 +8,9 @@ includes:
 vars:
   GREETING: Hello, World!
 
+dotenv:
+  - ".env"
+
 tasks:
   default:
     cmds:

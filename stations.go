@@ -7,16 +7,18 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/julienschmidt/httprouter"
 	spinhttp "github.com/spinframework/spin-go-sdk/http"
+	spinvars "github.com/spinframework/spin-go-sdk/variables"
+	"github.com/timgluz/wasserspiegel/secret"
 	"github.com/timgluz/wasserspiegel/station"
 )
 
 const (
 	JSONContentType = "application/json"
 	HTMLContentType = "text/html"
-	// PegelOnlineBaseURL is the base URL for the PegelOnline API.
-	PegelOnlineBaseURL = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"
 )
 
 var (
@@ -27,6 +29,31 @@ var (
 type StationAppConfig struct {
 	StoreName string `validate:"required"`
 	BaseURL   string `validate:"required"`
+	ApiKey    string `validate:"required"` // Optional, if needed for authentication
+}
+
+func NewStationAppConfigFromSpinVariables() (*StationAppConfig, error) {
+	apiKey, err := spinvars.Get("api_key")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get api_key from Spin variables: %w", err)
+	}
+
+	storeName, err := spinvars.Get("store_name")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get store_name from Spin variables: %w", err)
+	}
+
+	baseURL, err := spinvars.Get("base_url")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get base_url from Spin variables: %w", err)
+	}
+
+	return &StationAppConfig{
+		StoreName: storeName,
+		BaseURL:   baseURL,
+		ApiKey:    apiKey,
+	}, nil
+
 }
 
 // stationAppSystem holds the stateful components for the station service.
@@ -34,6 +61,7 @@ type StationAppConfig struct {
 type stationAppComponent struct {
 	stationRepository station.Repository
 	stationProvider   station.Provider
+	secretStore       secret.Store
 	logger            *slog.Logger
 }
 
@@ -75,6 +103,11 @@ func (s *stationAppComponent) IsReady() bool {
 		return false
 	}
 
+	if s.secretStore == nil {
+		s.logger.Error("Secret store is not initialized")
+		return false
+	}
+
 	s.logger.Info("Station app component is ready")
 	return true
 }
@@ -86,13 +119,13 @@ type StationDashboard struct {
 
 func init() {
 	spinhttp.Handle(func(w http.ResponseWriter, r *http.Request) {
-		//TODO: load configuration from environment or other sources
-		config := StationAppConfig{
-			StoreName: "stations",
-			BaseURL:   PegelOnlineBaseURL,
+		config, err := NewStationAppConfigFromSpinVariables()
+		if err != nil {
+			renderFatal(w, fmt.Errorf("failed to load station app configuration: %w", err))
+			return
 		}
 
-		appComponents, err := initSystemAppComponent(config)
+		appComponents, err := initSystemAppComponent(*config)
 		if err != nil {
 			fmt.Printf("Error initializing station service: %v\n", err)
 			return
@@ -109,9 +142,10 @@ func init() {
 		logger.Info("Station AppComponents successfully initialized", "storeName", config.StoreName)
 
 		router := spinhttp.NewRouter()
-		router.GET("/stations/:id/waterlevel", newWaterLevelHandler(appComponents))
-		router.GET("/stations/:id", newStationHandler(appComponents))
-		router.GET("/stations", newStationsHandler(appComponents))
+		router.GET("/stations/:id/waterlevel", bearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations/:id", bearerAuth(newStationHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations", bearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
+
 		router.NotFound = newNotFoundHandler(logger)
 
 		router.ServeHTTP(w, r)
@@ -132,7 +166,15 @@ func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, erro
 	spinHTTPClient := spinhttp.NewClient()
 	stationProvider := station.NewHTTPProvider(config.BaseURL, spinHTTPClient, logger)
 
-	return &stationAppComponent{stationRepository, stationProvider, logger}, nil
+	secretStore := secret.NewInMemoryStore()
+	if err != nil {
+		logger.Error("Failed to create secret store", "error", err)
+		return nil, fmt.Errorf("failed to create secret store: %w", err)
+	}
+
+	secretStore.Set(config.ApiKey, config.ApiKey)
+
+	return &stationAppComponent{stationRepository, stationProvider, secretStore, logger}, nil
 }
 
 func main() {}
@@ -141,6 +183,49 @@ func newNotFoundHandler(logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("Resource not found", "path", r.URL.Path)
 		renderError(w, ErrNotFound, http.StatusNotFound)
+	}
+}
+
+func bearerAuth(h httprouter.Handle, secretStore secret.Store) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || len(authHeader) < 7 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		authType := strings.ToLower(strings.TrimSpace(authHeader[:7]))
+		if authType != "bearer" {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unsupported authorization type", http.StatusBadRequest)
+			return
+		}
+
+		token := strings.TrimSpace(authHeader[7:]) // Extract the token part
+		if token == "" {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if secretStore == nil {
+			http.Error(w, "Service is not ready", http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := secretStore.Get(token); err != nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			if err == secret.ErrSecretNotFound {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			http.Error(w, fmt.Sprintf("Invalid token", err), http.StatusInternalServerError)
+			return
+		}
+
+		h(w, r, ps)
 	}
 }
 
@@ -209,17 +294,6 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 
 		renderJSONResponse(w, stationDashboard)
 	}
-}
-func renderJSONResponse(w http.ResponseWriter, data interface{}) {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		renderFatal(w, fmt.Errorf("failed to marshal data: %w", err))
-		return
-	}
-
-	w.Header().Set("Content-Type", JSONContentType)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(jsonData)
 }
 
 func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
@@ -381,4 +455,16 @@ func renderSuccess(w http.ResponseWriter, data []byte) {
 	w.Header().Set("Content-Type", JSONContentType)
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
+}
+
+func renderJSONResponse(w http.ResponseWriter, data interface{}) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		renderFatal(w, fmt.Errorf("failed to marshal data: %w", err))
+		return
+	}
+
+	w.Header().Set("Content-Type", JSONContentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jsonData)
 }
