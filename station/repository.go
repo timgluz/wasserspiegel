@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/spinframework/spin-go-sdk/kv"
+	"github.com/spinframework/spin-go-sdk/v2/kv"
 )
 
 const (

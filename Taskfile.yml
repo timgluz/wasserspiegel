@@ -20,6 +20,18 @@ tasks:
     cmds:
       - echo "Installing dependencies..."
       - go mod tidy
+  lint:
+    cmds:
+      - task: deps
+      - echo "Running linter..."
+      - golangci-lint run ./...
+    silent: true
+  test:
+    cmds:
+      - task: deps
+      - echo "Running tests..."
+      - go test ./...
+    silent: true
   build:
     cmds:
       - task: deps
@@ -37,3 +49,11 @@ tasks:
       - echo "Starting the application..."
       - spin up --runtime-config-file runtime-config.toml
     silent: true
+
+  deploy:
+    cmds:
+      - echo "Deploying the application..."
+      - spin deploy --variable api_key="{{.SPIN_VARIABLE_API_KEY}}"
+    silent: true
+    requires:
+      vars: [SPIN_VARIABLE_API_KEY]

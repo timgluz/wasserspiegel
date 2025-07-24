@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/julienschmidt/httprouter"
-	spinhttp "github.com/spinframework/spin-go-sdk/http"
-	spinvars "github.com/spinframework/spin-go-sdk/variables"
+	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
+	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
 	"github.com/timgluz/wasserspiegel/secret"
 	"github.com/timgluz/wasserspiegel/station"
 )

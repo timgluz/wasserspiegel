@@ -72,6 +72,9 @@ type Measurement struct {
 	Timestamp string  `json:"timestamp"`
 	Value     float64 `json:"value"`
 	Unit      string  `json:"unit"` // Unit of measurement, e.g., "cm" for centimeters
+
+	StartAt string `json:"start_at,omitempty"` // Start date for the measurement period, if applicable
+	EndAt   string `json:"end_at,omitempty"`   // End date for the measurement period, if applicable
 }
 
 func (m Measurement) Difference(other Measurement) (*Measurement, error) {
@@ -81,9 +84,11 @@ func (m Measurement) Difference(other Measurement) (*Measurement, error) {
 
 	// Calculate the difference between two measurements
 	return &Measurement{
-		Timestamp: other.Timestamp,
-		Value:     other.Value - m.Value,
+		Timestamp: m.Timestamp,
+		Value:     m.Value - other.Value,
 		Unit:      m.Unit,
+		EndAt:     m.Timestamp, // Assuming the end time is the same as the measurement time
+		StartAt:   other.Timestamp,
 	}, nil
 }
 
