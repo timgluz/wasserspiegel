@@ -36,9 +36,9 @@ func TestMeasurementDifference(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "invalid previous measurement",
+			name:        "unit mismatch",
 			current:     Measurement{Timestamp: "2023-10-01T12:00:00Z", Value: 10.0, Unit: "cm"},
-			previous:    Measurement{Timestamp: "2023-10-01T11:00:00Z", Value: 0.0, Unit: "cm"}, // Invalid previous value
+			previous:    Measurement{Timestamp: "2023-10-01T11:00:00Z", Value: 0.0, Unit: "m"}, // Invalid previous value
 			expected:    Measurement{},
 			expectError: true,
 		},
