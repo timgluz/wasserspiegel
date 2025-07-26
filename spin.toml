@@ -10,14 +10,12 @@ description = "TRML plugin for Wasserspiegel"
 api_key = { required = true }
 pegelonline_api_url = { default = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"}
 stations_store_name = { default = "stations" }
+log_level = { default = "info" }
 
 [[trigger.http]]
 route = "/..."
 component = "wasserspiegel"
 
-[[trigger.http]]
-route = "/stations/..."
-component = "stations"
 
 
 [component.wasserspiegel]
@@ -26,6 +24,15 @@ allowed_outbound_hosts = []
 [component.wasserspiegel.build]
 command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
 watch = ["**/main.go", "go.mod"]
+[component.wasserspiegel.variables]
+api_endpoint = "{{ pegelonline_api_url }}"
+api_key = ""
+store_name = ""
+
+[[trigger.http]]
+route = "/stations/..."
+component = "stations"
+
 
 [component.stations]
 source = "stations.wasm"
@@ -36,5 +43,25 @@ command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug
 watch = ["stations.go", "station/**/*.go", "go.mod"]
 [component.stations.variables]
 api_key = "{{ api_key }}"
-base_url = "{{ pegelonline_api_url }}"
+api_endpoint = "{{ pegelonline_api_url }}"
 store_name = "{{ stations_store_name }}"
+
+[[trigger.http]]
+route = "/search/..."
+component = "search"
+
+[component.search]
+source = "search/main.wasm"
+allowed_outbound_hosts = []
+
+[component.search.build]
+command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
+workdir = "search"
+watch = ["**/*.go", "go.mod"]
+
+[component.search.variables]
+stations_store_name = "{{ stations_store_name }}"
+api_key = "{{ api_key }}"
+log_level = "{{ log_level }}"
+
+

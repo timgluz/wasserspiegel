@@ -27,8 +27,10 @@ type Repository interface {
 	List(ctx context.Context, pagination *Pagination) (*StationCollection, error)
 	CreateList(ctx context.Context, stations *StationCollection) error
 
+	Has(ctx context.Context, id string) bool
 	GetByID(ctx context.Context, id string) (*Station, error)
 	Create(ctx context.Context, station *Station) error
+	Delete(ctx context.Context, id string) error
 
 	IsReady() bool
 	Close() error
@@ -106,14 +108,47 @@ func (r *SpinKVRepository) CreateList(ctx context.Context, stations *StationColl
 
 	// also store each station individually
 	for _, station := range stations.Stations {
+		if station.ID == "" {
+			r.logger.Warn("Skipping station with empty ID", "station", station)
+			continue
+		}
+
+		if r.Has(ctx, station.ID) {
+			r.logger.Debug("Station already exists, skipping", "id", station.ID)
+			continue
+		}
+
 		if err := r.Create(ctx, &station); err != nil {
-			r.logger.Error("Failed to add individual station to Spin KV", "id", station.UUID, "error", err)
+			r.logger.Error("Failed to add individual station to Spin KV", "id", station.ID, "error", err)
 			return err
 		}
 	}
 
 	r.logger.Info("Stations added successfully to Spin KV")
 	return nil
+}
+
+func (r *SpinKVRepository) Has(ctx context.Context, id string) bool {
+	defer ctx.Done()
+
+	if id == "" {
+		r.logger.Warn("Empty station ID provided, cannot check existence")
+		return false
+	}
+
+	if !r.IsReady() {
+		r.logger.Error("Spin KV store is not ready, cannot check existence")
+		return false
+	}
+
+	r.logger.Debug("Checking if station exists in Spin KV", "id", id)
+	ok, err := r.db.Exists(id)
+	if err != nil {
+		r.logger.Error("Failed to check existence of station in Spin KV", "id", id, "error", err)
+		return false
+	}
+
+	return ok
 }
 
 func (r *SpinKVRepository) GetByID(ctx context.Context, id string) (*Station, error) {
@@ -130,7 +165,7 @@ func (r *SpinKVRepository) GetByID(ctx context.Context, id string) (*Station, er
 		return nil, err
 	}
 
-	if station.UUID == "" {
+	if station.ID == "" {
 		r.logger.Warn("Unmarshalling returned empty station", "id", id)
 	}
 
@@ -148,12 +183,31 @@ func (r *SpinKVRepository) Create(ctx context.Context, station *Station) error {
 		return err
 	}
 
-	if err := r.setKey(ctx, station.UUID, jsonBlob); err != nil {
+	if err := r.setKey(ctx, station.ID, jsonBlob); err != nil {
 		r.logger.Error("Failed to add station to Spin KV", "error", err)
 		return err
 	}
 
-	r.logger.Debug("Station added to Spin KV", "id", station.UUID)
+	r.logger.Debug("Station added to Spin KV", "id", station.ID)
+	return nil
+}
+
+func (r *SpinKVRepository) Delete(ctx context.Context, id string) error {
+	defer ctx.Done()
+	if id == "" {
+		return errors.New("station ID cannot be empty")
+	}
+
+	if !r.IsReady() {
+		return ErrKVStoreNotAvailable
+	}
+
+	r.logger.Debug("Deleting station from Spin KV", "id", id)
+	if err := r.db.Delete(id); err != nil {
+		r.logger.Error("Failed to delete station from Spin KV", "id", id, "error", err)
+		return err
+	}
+	r.logger.Info("Station deleted successfully from Spin KV", "id", id)
 	return nil
 }
 

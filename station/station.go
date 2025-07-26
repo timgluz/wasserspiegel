@@ -1,5 +1,7 @@
 package station
 
+import "github.com/gosimple/slug"
+
 type StationCollection struct {
 	Stations []Station `json:"stations"`
 }
@@ -7,16 +9,25 @@ type StationCollection struct {
 type StationList []Station
 
 type Station struct {
-	UUID      string       `json:"uuid"`
-	Name      string       `json:"longname"`
-	ShortName string       `json:"shortname"`
-	KM        float64      `json:"km"`
-	Latitude  float64      `json:"latitude"`
-	Longitude float64      `json:"longitude"`
-	Water     StationWater `json:"water"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Water string `json:"water"`
+
+	Location    Location     `json:"location"`
+	ExternalIDs []ExternalID `json:"external_ids,omitempty"`
 }
 
-type StationWater struct {
-	Name      string `json:"longname"`
-	ShortName string `json:"shortname"`
+type ExternalID struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+type Location struct {
+	KM        float64 `json:"km"` // distance from the river source
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+func NewStationID(waterName, stationName string) string {
+	return slug.Make(waterName + "-" + stationName)
 }

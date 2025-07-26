@@ -7,11 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 
-	"github.com/julienschmidt/httprouter"
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
 	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
+	"github.com/timgluz/wasserspiegel/middleware"
 	"github.com/timgluz/wasserspiegel/secret"
 	"github.com/timgluz/wasserspiegel/station"
 )
@@ -19,6 +18,11 @@ import (
 const (
 	JSONContentType = "application/json"
 	HTMLContentType = "text/html"
+
+	DefaultSearchLimit   = 10
+	MaxSearchLimit       = 100
+	MinSearchQueryLength = 3
+	MaxSearchQueryLength = 100
 )
 
 var (
@@ -27,9 +31,9 @@ var (
 )
 
 type StationAppConfig struct {
-	StoreName string `validate:"required"`
-	BaseURL   string `validate:"required"`
-	ApiKey    string `validate:"required"` // Optional, if needed for authentication
+	StoreName   string `validate:"required"`
+	APIEndpoint string `validate:"required"`
+	ApiKey      string `validate:"required"` // Optional, if needed for authentication
 }
 
 func NewStationAppConfigFromSpinVariables() (*StationAppConfig, error) {
@@ -43,17 +47,22 @@ func NewStationAppConfigFromSpinVariables() (*StationAppConfig, error) {
 		return nil, fmt.Errorf("failed to get store_name from Spin variables: %w", err)
 	}
 
-	baseURL, err := spinvars.Get("base_url")
+	apiEndpoint, err := spinvars.Get("api_endpoint")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get base_url from Spin variables: %w", err)
 	}
 
 	return &StationAppConfig{
-		StoreName: storeName,
-		BaseURL:   baseURL,
-		ApiKey:    apiKey,
+		StoreName:   storeName,
+		APIEndpoint: apiEndpoint,
+		ApiKey:      apiKey,
 	}, nil
 
+}
+
+type APIResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
 }
 
 // stationAppSystem holds the stateful components for the station service.
@@ -142,9 +151,10 @@ func init() {
 		logger.Info("Station AppComponents successfully initialized", "storeName", config.StoreName)
 
 		router := spinhttp.NewRouter()
-		router.GET("/stations/:id/waterlevel", bearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
-		router.GET("/stations/:id", bearerAuth(newStationHandler(appComponents), appComponents.secretStore))
-		router.GET("/stations", bearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
+		router.POST("/stations/admin/seed", middleware.BearerAuth(newStationSeederHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations/:id/waterlevel/", middleware.BearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations/:id", middleware.BearerAuth(newStationHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations", middleware.BearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
 
 		router.NotFound = newNotFoundHandler(logger)
 
@@ -153,7 +163,7 @@ func init() {
 }
 
 func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, error) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("component", "station")
 	logger.Info("Initializing station service")
 
 	// Initialize the Spin KV repository for station data
@@ -164,7 +174,7 @@ func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, erro
 	}
 
 	spinHTTPClient := spinhttp.NewClient()
-	stationProvider := station.NewHTTPProvider(config.BaseURL, spinHTTPClient, logger)
+	stationProvider := station.NewPegelOnlineProvider(config.APIEndpoint, spinHTTPClient, logger)
 
 	secretStore := secret.NewInMemoryStore()
 	if err != nil {
@@ -185,50 +195,6 @@ func newNotFoundHandler(logger *slog.Logger) http.HandlerFunc {
 		renderError(w, ErrNotFound, http.StatusNotFound)
 	}
 }
-
-func bearerAuth(h httprouter.Handle, secretStore secret.Store) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || len(authHeader) < 7 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		authType := strings.ToLower(strings.TrimSpace(authHeader[:7]))
-		if authType != "bearer" {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "Unsupported authorization type", http.StatusBadRequest)
-			return
-		}
-
-		token := strings.TrimSpace(authHeader[7:]) // Extract the token part
-		if token == "" {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		if secretStore == nil {
-			http.Error(w, "Service is not ready", http.StatusInternalServerError)
-			return
-		}
-
-		if _, err := secretStore.Get(token); err != nil {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			if err == secret.ErrSecretNotFound {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			http.Error(w, fmt.Sprintf("Invalid token", err), http.StatusInternalServerError)
-			return
-		}
-
-		h(w, r, ps)
-	}
-}
-
 func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
 	return func(w http.ResponseWriter, r *http.Request, _ spinhttp.Params) {
 		logger := appComponents.logger
@@ -331,6 +297,39 @@ func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHan
 	}
 }
 
+func newStationSeederHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
+	return func(w http.ResponseWriter, r *http.Request, _ spinhttp.Params) {
+		logger := appComponents.logger
+
+		if !appComponents.IsReady() {
+			logger.Error("Station app components are not ready")
+			renderFatal(w, fmt.Errorf("station app components are not ready"))
+			return
+		}
+
+		seeder := station.NewProviderSeeder(logger)
+		if seeder == nil {
+			logger.Error("Failed to create station seeder")
+			renderFatal(w, fmt.Errorf("failed to create station seeder"))
+			return
+		}
+
+		logger.Info("Seeding stations from provider to repository")
+		err := seeder.Seed(context.Background(), appComponents.stationProvider, appComponents.stationRepository)
+		if err != nil {
+			logger.Error("Failed to seed stations", "error", err)
+			renderFatal(w, err)
+			return
+		}
+
+		logger.Info("Successfully seeded stations")
+		renderJSONResponse(w, APIResponse{
+			Success: true,
+			Message: "Stations seeded successfully",
+		})
+	}
+}
+
 func fetchCachedStations(appComponents *stationAppComponent) (*station.StationCollection, error) {
 	logger := appComponents.logger
 	stationRepository := appComponents.stationRepository
@@ -341,30 +340,12 @@ func fetchCachedStations(appComponents *stationAppComponent) (*station.StationCo
 
 	fmt.Println("Checking if stations exist in repository")
 	stationCollection, err := stationRepository.List(context.Background(), nil)
-	if err == nil && stationCollection != nil {
-		logger.Debug("Stations found in repository, returning cached data", "count", len(stationCollection.Stations))
-		return stationCollection, nil
-	}
-
-	logger.Warn("No cached stations found in repository, fetching from external provider")
-	stationCollection, err = appComponents.stationProvider.GetStations(context.Background())
 	if err != nil {
-		logger.Error("Failed to fetch stations from provider", "error", err)
-		return nil, fmt.Errorf("failed to fetch stations from provider: %w", err)
+		logger.Error("Failed to get stations from repository", "error", err)
+		return nil, err
 	}
 
-	if stationCollection == nil || len(stationCollection.Stations) == 0 {
-		logger.Warn("No stations found in fetched data, check if data schema has changed")
-		return nil, fmt.Errorf("no stations found in fetched data")
-	}
-
-	logger.Debug("Storing stations to repository", "count", len(stationCollection.Stations))
-	err = stationRepository.CreateList(context.Background(), stationCollection)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add stations to repository: %w", err)
-	}
-
-	logger.Info("Successfully fetched and cached stations", "count", len(stationCollection.Stations))
+	logger.Debug("Stations found in repository, returning cached data", "count", len(stationCollection.Stations))
 	return stationCollection, nil
 }
 
@@ -382,27 +363,13 @@ func fetchCachedStationByID(appComponents *stationAppComponent, id string) (*sta
 
 	logger.Debug("Checking if station exists in repository", "id", id)
 	station, err := stationRepository.GetByID(context.Background(), id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get station by ID: %w", err)
+	}
+
 	if err == nil && station != nil {
 		logger.Debug("Station found in repository, returning cached data", "id", id)
 		return station, nil
-	}
-
-	logger.Warn("No cached station found in repository, fetching from external provider")
-	station, err = appComponents.stationProvider.GetStation(context.Background(), id)
-	if err != nil {
-		logger.Error("Failed to fetch station from provider", "id", id, "error", err)
-		return nil, fmt.Errorf("failed to fetch station from provider: %w", err)
-	}
-
-	if station == nil {
-		logger.Warn("Station not found in fetched data", "id", id)
-		return nil, fmt.Errorf("station not found with ID: %s", id)
-	}
-
-	logger.Debug("Storing station to repository", "id", id)
-	err = stationRepository.Create(context.Background(), station)
-	if err != nil {
-		return nil, fmt.Errorf("failed to add station to repository: %w", err)
 	}
 
 	logger.Info("Successfully fetched and cached station", "id", id)
@@ -429,8 +396,6 @@ func fetchCachedWaterLevels(appComponents *stationAppComponent, stationID string
 	if err := waterLevelCollection.CalculateTrends(waterLevelCollection.Measurements); err != nil {
 		logger.Error("Failed to calculate trends for water levels", "id", stationID, "error", err)
 	}
-
-	// TODO: cache water level collection in repository
 
 	logger.Debug("Successfully fetched water levels for station", "id", stationID, "count", len(waterLevelCollection.Measurements))
 	return waterLevelCollection, nil
