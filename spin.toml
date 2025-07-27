@@ -16,8 +16,6 @@ log_level = { default = "info" }
 route = "/..."
 component = "wasserspiegel"
 
-
-
 [component.wasserspiegel]
 source = "main.wasm"
 allowed_outbound_hosts = []
@@ -25,22 +23,20 @@ allowed_outbound_hosts = []
 command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
 watch = ["**/main.go", "go.mod"]
 [component.wasserspiegel.variables]
-api_endpoint = "{{ pegelonline_api_url }}"
-api_key = ""
 store_name = ""
 
 [[trigger.http]]
 route = "/stations/..."
 component = "stations"
 
-
 [component.stations]
-source = "stations.wasm"
+source = "app/station/main.wasm"
 key_value_stores = ["stations"]
 allowed_outbound_hosts = ["https://www.pegelonline.wsv.de"]
 [component.stations.build]
-command = "tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o stations.wasm stations.go"
-watch = ["stations.go", "station/**/*.go", "go.mod"]
+command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
+workdir = "app/station"
+watch = ["**/*.go", "go.mod"]
 [component.stations.variables]
 api_key = "{{ api_key }}"
 api_endpoint = "{{ pegelonline_api_url }}"
@@ -51,12 +47,13 @@ route = "/search/..."
 component = "search"
 
 [component.search]
-source = "search/main.wasm"
+source = "app/search/main.wasm"
+key_value_stores = ["stations"]
 allowed_outbound_hosts = []
 
 [component.search.build]
 command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
-workdir = "search"
+workdir = "app/search"
 watch = ["**/*.go", "go.mod"]
 
 [component.search.variables]

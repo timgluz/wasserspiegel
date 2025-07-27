@@ -15,4 +15,4 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 )
 
-replace github.com/timgluz/wasserspiegel => ./..
+replace github.com/timgluz/wasserspiegel => ./../..

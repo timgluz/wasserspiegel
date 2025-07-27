@@ -12,6 +12,8 @@ import (
 
 const (
 	AllStationsKey = "all_stations"
+	DefaultLimit   = 100
+	DefaultOffset  = 0
 )
 
 var (
@@ -25,7 +27,6 @@ type Pagination struct {
 
 type Repository interface {
 	List(ctx context.Context, pagination *Pagination) (*StationCollection, error)
-	CreateList(ctx context.Context, stations *StationCollection) error
 
 	Has(ctx context.Context, id string) bool
 	GetByID(ctx context.Context, id string) (*Station, error)
@@ -72,60 +73,61 @@ func (r *SpinKVRepository) IsReady() bool {
 func (r *SpinKVRepository) List(ctx context.Context, pagination *Pagination) (*StationCollection, error) {
 	defer ctx.Done()
 
-	jsonBlob, err := r.getKey(ctx, AllStationsKey)
+	keys, err := r.db.GetKeys()
 	if err != nil {
-		r.logger.Debug("No stations found in Spin KV, returning empty collection")
+		r.logger.Error("Failed to retrieve keys from Spin KV", "error", err)
 		return nil, err
 	}
 
-	var stationCollection StationCollection
-	if err := json.Unmarshal(jsonBlob, &stationCollection); err != nil {
-		r.logger.Error("Failed to unmarshal stations", "error", err)
-		return nil, err
+	if len(keys) == 0 {
+		r.logger.Info("No stations found in Spin KV")
 	}
 
-	return &stationCollection, nil
-}
-
-func (r *SpinKVRepository) CreateList(ctx context.Context, stations *StationCollection) error {
-	defer ctx.Done()
-
-	if stations == nil {
-		return errors.New("stations cannot be nil")
+	// If pagination is nil, then list all stations
+	if pagination == nil {
+		pagination = &Pagination{
+			Limit:  len(keys),
+			Offset: DefaultOffset,
+		}
 	}
 
-	r.logger.Debug("Adding stations to Spin KV")
-	jsonBlob, err := json.Marshal(stations)
-	if err != nil {
-		r.logger.Error("Failed to marshal stations", "error", err)
-		return err
+	limit := pagination.Limit
+	if limit <= 0 || limit > len(keys) {
+		limit = len(keys)
 	}
 
-	if err := r.setKey(ctx, AllStationsKey, jsonBlob); err != nil {
-		r.logger.Error("Failed to add stations to Spin KV", "error", err)
-		return err
+	offset := pagination.Offset
+	if offset < 0 || offset >= len(keys) {
+		offset = 0
 	}
 
-	// also store each station individually
-	for _, station := range stations.Stations {
-		if station.ID == "" {
-			r.logger.Warn("Skipping station with empty ID", "station", station)
+	if offset+limit > len(keys) {
+		limit = len(keys) - offset
+	}
+
+	r.logger.Debug("Listing stations from Spin KV", "limit", limit, "offset", offset)
+	stations := make([]Station, 0, limit)
+	for i := offset; i < offset+limit; i++ {
+		if keys[i] == AllStationsKey {
+			r.logger.Debug("Skipping AllStationsKey in listing")
 			continue
 		}
 
-		if r.Has(ctx, station.ID) {
-			r.logger.Debug("Station already exists, skipping", "id", station.ID)
+		station, err := r.GetByID(ctx, keys[i])
+		if err != nil {
+			r.logger.Error("Failed to get station by ID", "id", keys[i], "error", err)
 			continue
 		}
 
-		if err := r.Create(ctx, &station); err != nil {
-			r.logger.Error("Failed to add individual station to Spin KV", "id", station.ID, "error", err)
-			return err
+		if station == nil {
+			r.logger.Warn("Got nil station for key", "key", keys[i])
+			continue
 		}
+
+		stations = append(stations, *station)
 	}
 
-	r.logger.Info("Stations added successfully to Spin KV")
-	return nil
+	return &StationCollection{Stations: stations}, nil
 }
 
 func (r *SpinKVRepository) Has(ctx context.Context, id string) bool {

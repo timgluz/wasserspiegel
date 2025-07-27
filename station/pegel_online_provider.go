@@ -117,7 +117,8 @@ func (p *PegelOnlineProvider) GetStationWaterLevel(ctx context.Context, id strin
 		return nil, ErrProviderNotReady
 	}
 
-	resourceURL := fmt.Sprintf("%s/stations/%s/waterlevel.json", p.APIEndpoint, id)
+	period := DefaultTimePeriod // Default period is 15 days
+	resourceURL := fmt.Sprintf("%s/stations/%s/W/measurements.json?start=%s", p.APIEndpoint, id, period)
 	jsonContent, err := p.RetrieveContent(ctx, resourceURL)
 	if err != nil {
 		return nil, err

@@ -152,9 +152,9 @@ func init() {
 
 		router := spinhttp.NewRouter()
 		router.POST("/stations/admin/seed", middleware.BearerAuth(newStationSeederHandler(appComponents), appComponents.secretStore))
+		router.GET("/stations", middleware.BearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations/:id/waterlevel/", middleware.BearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations/:id", middleware.BearerAuth(newStationHandler(appComponents), appComponents.secretStore))
-		router.GET("/stations", middleware.BearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
 
 		router.NotFound = newNotFoundHandler(logger)
 
@@ -233,28 +233,33 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 		}
 
 		logger.Debug("Fetching station by ID", "id", stationID)
-		station, err := fetchCachedStationByID(appComponents, stationID)
+		stationItem, err := fetchCachedStationByID(appComponents, stationID)
 		if err != nil {
 			logger.Error("Failed to fetch station by ID", "id", stationID, "error", err)
 			renderFatal(w, err)
 			return
 		}
 
-		if station == nil {
+		if stationItem == nil {
 			logger.Warn("Station not found", "id", stationID)
 			renderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
-		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, stationID)
+		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, *stationItem)
 		if err != nil {
 			logger.Error("Failed to fetch water levels for station", "id", stationID, "error", err)
-			renderFatal(w, err)
-			return
+			waterLevelCollection = &station.WaterLevelCollection{
+				StationID:    stationItem.ID,
+				Start:        station.DefaultTimePeriod, // Default start period
+				End:          station.DefaultTimePeriod, // Default end period
+				Unit:         station.UnitCM,            // Default unit for water level measurements
+				Measurements: []station.Measurement{},
+			}
 		}
 
 		stationDashboard := &StationDashboard{
-			Station:    station,
+			Station:    stationItem,
 			WaterLevel: waterLevelCollection,
 		}
 
@@ -273,7 +278,14 @@ func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHan
 			return
 		}
 
-		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, stationID)
+		stationItem, err := fetchCachedStationByID(appComponents, stationID)
+		if err != nil {
+			logger.Error("Failed to fetch station by ID", "id", stationID, "error", err)
+			renderFatal(w, err)
+			return
+		}
+
+		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, *stationItem)
 		if err != nil {
 			logger.Error("Failed to fetch water levels", "id", stationID, "error", err)
 			renderFatal(w, err)
@@ -338,7 +350,7 @@ func fetchCachedStations(appComponents *stationAppComponent) (*station.StationCo
 		return nil, fmt.Errorf("station repository is not ready")
 	}
 
-	fmt.Println("Checking if stations exist in repository")
+	fmt.Println("Fetching stations from repository")
 	stationCollection, err := stationRepository.List(context.Background(), nil)
 	if err != nil {
 		logger.Error("Failed to get stations from repository", "error", err)
@@ -376,12 +388,20 @@ func fetchCachedStationByID(appComponents *stationAppComponent, id string) (*sta
 	return station, nil
 }
 
-func fetchCachedWaterLevels(appComponents *stationAppComponent, stationID string) (*station.WaterLevelCollection, error) {
+func fetchCachedWaterLevels(appComponents *stationAppComponent, stationItem station.Station) (*station.WaterLevelCollection, error) {
 	logger := appComponents.logger
 
-	waterLevelCollection, err := appComponents.stationProvider.GetStationWaterLevel(context.Background(), stationID)
+	stationID := stationItem.ID
+	pegelOnlineID, ok := stationItem.GetExternalID(station.PegelOnlineProviderName)
+	if !ok || pegelOnlineID == "" {
+		logger.Error("Station does not have a valid PegelOnline ID", "stationID", stationItem.ID)
+		return nil, fmt.Errorf("station does not have a valid PegelOnline ID: %s", stationItem.ID)
+	}
+
+	logger.Debug("Fetching water levels for station", "id", stationID, "pegelOnlineID", pegelOnlineID)
+	waterLevelCollection, err := appComponents.stationProvider.GetStationWaterLevel(context.Background(), pegelOnlineID)
 	if err != nil {
-		logger.Error("Failed to fetch water levels from provider", "id", stationID, "error", err)
+		logger.Error("Failed to fetch water levels from provider", "id", stationID, "pegelOnlineID", pegelOnlineID, "error", err)
 		return nil, fmt.Errorf("failed to fetch water levels from provider: %w", err)
 	}
 

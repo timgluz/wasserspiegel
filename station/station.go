@@ -17,6 +17,15 @@ type Station struct {
 	ExternalIDs []ExternalID `json:"external_ids,omitempty"`
 }
 
+func (s Station) GetExternalID(name string) (string, bool) {
+	for _, id := range s.ExternalIDs {
+		if id.Name == name {
+			return id.ID, true
+		}
+	}
+	return "", false
+}
+
 type ExternalID struct {
 	Name string `json:"name"`
 	ID   string `json:"id"`
