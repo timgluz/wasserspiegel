@@ -11,6 +11,7 @@ import (
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
 	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
 	"github.com/timgluz/wasserspiegel/middleware"
+	"github.com/timgluz/wasserspiegel/response"
 	"github.com/timgluz/wasserspiegel/secret"
 	"github.com/timgluz/wasserspiegel/station"
 )
@@ -130,7 +131,7 @@ func init() {
 	spinhttp.Handle(func(w http.ResponseWriter, r *http.Request) {
 		config, err := NewStationAppConfigFromSpinVariables()
 		if err != nil {
-			renderFatal(w, fmt.Errorf("failed to load station app configuration: %w", err))
+			response.RenderFatal(w, fmt.Errorf("failed to load station app configuration: %w", err))
 			return
 		}
 
@@ -143,7 +144,7 @@ func init() {
 
 		if !appComponents.IsReady() {
 			fmt.Println("Station app components are not ready")
-			renderFatal(w, fmt.Errorf("station app components are not ready"))
+			response.RenderFatal(w, fmt.Errorf("station app components are not ready"))
 			return
 		}
 
@@ -156,7 +157,7 @@ func init() {
 		router.GET("/stations/:id/waterlevel/", middleware.BearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations/:id", middleware.BearerAuth(newStationHandler(appComponents), appComponents.secretStore))
 
-		router.NotFound = newNotFoundHandler(logger)
+		router.NotFound = response.NewNotFoundHandler(logger)
 
 		router.ServeHTTP(w, r)
 	})
@@ -189,12 +190,6 @@ func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, erro
 
 func main() {}
 
-func newNotFoundHandler(logger *slog.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		logger.Warn("Resource not found", "path", r.URL.Path)
-		renderError(w, ErrNotFound, http.StatusNotFound)
-	}
-}
 func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
 	return func(w http.ResponseWriter, r *http.Request, _ spinhttp.Params) {
 		logger := appComponents.logger
@@ -203,24 +198,24 @@ func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandl
 		stationCollection, err := fetchCachedStations(appComponents)
 		if err != nil {
 			logger.Error("Failed to fetch stations", "error", err)
-			renderFatal(w, err)
+			response.RenderFatal(w, err)
 			return
 		}
 
 		if stationCollection == nil || len(stationCollection.Stations) == 0 {
 			logger.Warn("No stations found in the collection")
-			renderError(w, ErrNotFound, http.StatusNotFound)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
 		jsonData, err := json.Marshal(stationCollection)
 		if err != nil {
 			logger.Error("Failed to marshal station data", "error", err)
-			renderFatal(w, ErrFailedToMarshal)
+			response.RenderFatal(w, ErrFailedToMarshal)
 			return
 		}
 
-		renderSuccess(w, jsonData)
+		response.RenderSuccess(w, jsonData)
 	}
 }
 
@@ -229,20 +224,20 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 		logger := appComponents.logger
 		stationID := params.ByName("id")
 		if stationID == "" {
-			renderError(w, ErrNotFound, http.StatusNotFound)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 		}
 
 		logger.Debug("Fetching station by ID", "id", stationID)
 		stationItem, err := fetchCachedStationByID(appComponents, stationID)
 		if err != nil {
 			logger.Error("Failed to fetch station by ID", "id", stationID, "error", err)
-			renderFatal(w, err)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
 		if stationItem == nil {
 			logger.Warn("Station not found", "id", stationID)
-			renderError(w, ErrNotFound, http.StatusNotFound)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
@@ -263,7 +258,7 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 			WaterLevel: waterLevelCollection,
 		}
 
-		renderJSONResponse(w, stationDashboard)
+		response.RenderJSONResponse(w, stationDashboard)
 	}
 }
 
@@ -274,38 +269,38 @@ func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHan
 		logger.Debug("Fetching water level for station", "id", stationID)
 
 		if stationID == "" {
-			renderError(w, ErrNotFound, http.StatusNotFound)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
 		stationItem, err := fetchCachedStationByID(appComponents, stationID)
 		if err != nil {
 			logger.Error("Failed to fetch station by ID", "id", stationID, "error", err)
-			renderFatal(w, err)
+			response.RenderFatal(w, err)
 			return
 		}
 
 		waterLevelCollection, err := fetchCachedWaterLevels(appComponents, *stationItem)
 		if err != nil {
 			logger.Error("Failed to fetch water levels", "id", stationID, "error", err)
-			renderFatal(w, err)
+			response.RenderFatal(w, err)
 			return
 		}
 
 		if waterLevelCollection == nil || len(waterLevelCollection.Measurements) == 0 {
 			logger.Warn("No water levels found for station", "id", stationID)
-			renderError(w, ErrNotFound, http.StatusNotFound)
+			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
 		}
 
 		jsonData, err := json.Marshal(waterLevelCollection)
 		if err != nil {
 			logger.Error("Failed to marshal water level data", "id", stationID, "error", err)
-			renderFatal(w, ErrFailedToMarshal)
+			response.RenderFatal(w, ErrFailedToMarshal)
 			return
 		}
 
-		renderSuccess(w, jsonData)
+		response.RenderSuccess(w, jsonData)
 	}
 }
 
@@ -315,14 +310,14 @@ func newStationSeederHandler(appComponents *stationAppComponent) spinhttp.Router
 
 		if !appComponents.IsReady() {
 			logger.Error("Station app components are not ready")
-			renderFatal(w, fmt.Errorf("station app components are not ready"))
+			response.RenderFatal(w, fmt.Errorf("station app components are not ready"))
 			return
 		}
 
 		seeder := station.NewProviderSeeder(logger)
 		if seeder == nil {
 			logger.Error("Failed to create station seeder")
-			renderFatal(w, fmt.Errorf("failed to create station seeder"))
+			response.RenderFatal(w, fmt.Errorf("failed to create station seeder"))
 			return
 		}
 
@@ -330,12 +325,12 @@ func newStationSeederHandler(appComponents *stationAppComponent) spinhttp.Router
 		err := seeder.Seed(context.Background(), appComponents.stationProvider, appComponents.stationRepository)
 		if err != nil {
 			logger.Error("Failed to seed stations", "error", err)
-			renderFatal(w, err)
+			response.RenderFatal(w, err)
 			return
 		}
 
 		logger.Info("Successfully seeded stations")
-		renderJSONResponse(w, APIResponse{
+		response.RenderJSONResponse(w, APIResponse{
 			Success: true,
 			Message: "Stations seeded successfully",
 		})
@@ -419,36 +414,4 @@ func fetchCachedWaterLevels(appComponents *stationAppComponent, stationItem stat
 
 	logger.Debug("Successfully fetched water levels for station", "id", stationID, "count", len(waterLevelCollection.Measurements))
 	return waterLevelCollection, nil
-}
-
-func renderFatal(w http.ResponseWriter, err error) {
-	w.Header().Set("Content-Type", JSONContentType)
-
-	jsonError := fmt.Sprintf(`{"error": "%s"}`, err.Error())
-	http.Error(w, jsonError, http.StatusInternalServerError)
-}
-
-func renderError(w http.ResponseWriter, err error, statusCode int) {
-	w.Header().Set("Content-Type", JSONContentType)
-
-	jsonError := fmt.Sprintf(`{"error": "%s"}`, err.Error())
-	http.Error(w, jsonError, statusCode)
-}
-
-func renderSuccess(w http.ResponseWriter, data []byte) {
-	w.Header().Set("Content-Type", JSONContentType)
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
-}
-
-func renderJSONResponse(w http.ResponseWriter, data interface{}) {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		renderFatal(w, fmt.Errorf("failed to marshal data: %w", err))
-		return
-	}
-
-	w.Header().Set("Content-Type", JSONContentType)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(jsonData)
 }

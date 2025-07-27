@@ -57,3 +57,15 @@ tasks:
     silent: true
     requires:
       vars: [SPIN_VARIABLE_API_KEY]
+
+  "test:e2e":
+    cmds:
+      - echo "running e2e tests..."
+      - hurl test --glob test/e2e/**/*.hurl --variable host={{.API_HOST}} --variable api_key={{.SPIN_VARIABLE_API_KEY}} && echo "E2E tests passed!"
+    requires:
+      vars: [API_HOST, SPIN_VARIABLE_API_KEY]
+    preconditions:
+      - sh: "test -f runtime-config.toml"
+        msg: "runtime-config.toml file is required to run this task."
+      - sh: "curl --connect-timeout 10 --max-time 15 --silent --head {{.API_HOST}} | grep -q '200'"
+        msg: "API host {{.API_HOST}} is not reachable."
