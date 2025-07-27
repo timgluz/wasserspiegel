@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
@@ -125,20 +124,6 @@ func newStationSearchHandler(appComponents *searchAppComponent) spinhttp.RouterH
 			return
 		}
 
-		queryPagination := response.NewPaginationFromRequest(r)
-		collection, err := appComponents.stationRepository.List(context.Background(), queryPagination.Offset, queryPagination.Limit)
-		if err != nil {
-			logger.Error("Failed to fetch stations", "error", err)
-			response.RenderFatal(w, err)
-			return
-		}
-
-		if collection == nil || len(collection.Stations) == 0 {
-			logger.Warn("No stations found in the collection")
-			response.RenderError(w, response.ErrNotFound, http.StatusNotFound)
-			return
-		}
-
 		searchQuery := r.URL.Query().Get("q")
 		if searchQuery == "" {
 			logger.Warn("Search query is empty")
@@ -156,26 +141,23 @@ func newStationSearchHandler(appComponents *searchAppComponent) spinhttp.RouterH
 			return
 		}
 
-		limitStr := r.URL.Query().Get("limit")
-		if limitStr == "" {
-			limitStr = "10" // Default limit
-		}
-
-		limit, err := strconv.Atoi(limitStr)
-		if err != nil || limit <= 0 {
-			logger.Warn("Invalid limit value", "limit", limitStr)
-			limit = DefaultSearchLimit // Use a default limit if parsing fails
-		}
-
-		if limit > MaxSearchLimit {
-			logger.Warn("Limit exceeds maximum allowed value", "limit", limit)
-			limit = MaxSearchLimit // Cap the limit to the maximum allowed value
-		}
-
 		searchQuery = strings.ToLower(strings.TrimSpace(searchQuery))
+		queryPagination := response.NewPaginationFromRequest(r)
+		collection, err := appComponents.stationRepository.List(context.Background(), queryPagination.Offset, -1)
+		if err != nil {
+			logger.Error("Failed to fetch stations", "error", err)
+			response.RenderFatal(w, err)
+			return
+		}
+
 		logger.Debug("Searching stations", "query", searchQuery)
-		var results []station.Station
+		results := make([]station.Station, 0)
 		for _, s := range collection.Stations {
+			if len(results) >= queryPagination.Limit {
+				logger.Debug("Reached maximum search results limit", "limit", MaxSearchLimit)
+				break
+			}
+
 			if strings.Contains(strings.ToLower(s.Name), searchQuery) ||
 				strings.Contains(strings.ToLower(s.ID), searchQuery) {
 				results = append(results, s)
