@@ -191,11 +191,12 @@ func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, erro
 func main() {}
 
 func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
-	return func(w http.ResponseWriter, r *http.Request, _ spinhttp.Params) {
+	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
 		logger := appComponents.logger
 
 		logger.Debug("Fetching all stations")
-		stationCollection, err := fetchCachedStations(appComponents)
+		queryPagination := response.NewPaginationFromRequest(r)
+		stationCollection, err := fetchCachedStations(appComponents, queryPagination)
 		if err != nil {
 			logger.Error("Failed to fetch stations", "error", err)
 			response.RenderFatal(w, err)
@@ -208,14 +209,11 @@ func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandl
 			return
 		}
 
-		jsonData, err := json.Marshal(stationCollection)
-		if err != nil {
-			logger.Error("Failed to marshal station data", "error", err)
-			response.RenderFatal(w, ErrFailedToMarshal)
-			return
-		}
-
-		response.RenderSuccess(w, jsonData)
+		queryPagination.Total = len(stationCollection.Stations)
+		response.RenderJSONResponse(w, map[string]interface{}{
+			"stations":   stationCollection.Stations,
+			"pagination": queryPagination,
+		})
 	}
 }
 
@@ -337,7 +335,7 @@ func newStationSeederHandler(appComponents *stationAppComponent) spinhttp.Router
 	}
 }
 
-func fetchCachedStations(appComponents *stationAppComponent) (*station.StationCollection, error) {
+func fetchCachedStations(appComponents *stationAppComponent, pagination response.Pagination) (*station.StationCollection, error) {
 	logger := appComponents.logger
 	stationRepository := appComponents.stationRepository
 
@@ -345,8 +343,7 @@ func fetchCachedStations(appComponents *stationAppComponent) (*station.StationCo
 		return nil, fmt.Errorf("station repository is not ready")
 	}
 
-	fmt.Println("Fetching stations from repository")
-	stationCollection, err := stationRepository.List(context.Background(), nil)
+	stationCollection, err := stationRepository.List(context.Background(), pagination.Offset, pagination.Limit)
 	if err != nil {
 		logger.Error("Failed to get stations from repository", "error", err)
 		return nil, err

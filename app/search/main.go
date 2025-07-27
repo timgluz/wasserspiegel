@@ -48,10 +48,8 @@ func NewSearchAppConfigFromSpinVariables() (*SearchAppConfig, error) {
 }
 
 type SearchResponse struct {
-	Results []station.Station `json:"results"`
-	Total   int               `json:"total"`
-	Limit   int               `json:"limit"`
-	Offset  int               `json:"offset"`
+	Results    []station.Station   `json:"results"`
+	Pagination response.Pagination `json:"pagination"`
 }
 
 func init() {
@@ -127,7 +125,8 @@ func newStationSearchHandler(appComponents *searchAppComponent) spinhttp.RouterH
 			return
 		}
 
-		collection, err := appComponents.stationRepository.List(context.Background(), nil)
+		queryPagination := response.NewPaginationFromRequest(r)
+		collection, err := appComponents.stationRepository.List(context.Background(), queryPagination.Offset, queryPagination.Limit)
 		if err != nil {
 			logger.Error("Failed to fetch stations", "error", err)
 			response.RenderFatal(w, err)
@@ -183,11 +182,10 @@ func newStationSearchHandler(appComponents *searchAppComponent) spinhttp.RouterH
 			}
 		}
 
+		queryPagination.Total = len(results)
 		response.RenderJSONResponse(w, SearchResponse{
-			Results: results,
-			Total:   len(collection.Stations),
-			Limit:   limit,
-			Offset:  0, // Offset is not used in this example, but can be implemented if needed
+			Results:    results,
+			Pagination: queryPagination,
 		})
 	}
 }

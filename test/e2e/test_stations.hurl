@@ -11,6 +11,20 @@ jsonpath "$.stations" exists
 GET {{host}}/stations
 HTTP 401
 
+# test limit and offset parameters
+GET {{host}}/stations?limit=5&offset=10
+Content-Type: application/json
+Authorization: Bearer {{api_key}}
+HTTP 200
+[Asserts]
+header "Content-Type" == "application/json"
+jsonpath "$.stations" exists
+jsonpath "$.stations" count == 5
+jsonpath "$.pagination" exists
+jsonpath "$.pagination.limit" == 5
+jsonpath "$.pagination.offset" == 10
+jsonpath "$.pagination.total" exists
+jsonpath "$.pagination.total" > 0
 
 # test get a specific station
 GET {{host}}/stations/rhein-mannheim

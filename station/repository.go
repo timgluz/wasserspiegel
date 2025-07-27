@@ -26,7 +26,7 @@ type Pagination struct {
 }
 
 type Repository interface {
-	List(ctx context.Context, pagination *Pagination) (*StationCollection, error)
+	List(ctx context.Context, offset int, limit int) (*StationCollection, error)
 
 	Has(ctx context.Context, id string) bool
 	GetByID(ctx context.Context, id string) (*Station, error)
@@ -70,7 +70,7 @@ func (r *SpinKVRepository) IsReady() bool {
 	return true
 }
 
-func (r *SpinKVRepository) List(ctx context.Context, pagination *Pagination) (*StationCollection, error) {
+func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) (*StationCollection, error) {
 	defer ctx.Done()
 
 	keys, err := r.db.GetKeys()
@@ -83,20 +83,10 @@ func (r *SpinKVRepository) List(ctx context.Context, pagination *Pagination) (*S
 		r.logger.Info("No stations found in Spin KV")
 	}
 
-	// If pagination is nil, then list all stations
-	if pagination == nil {
-		pagination = &Pagination{
-			Limit:  len(keys),
-			Offset: DefaultOffset,
-		}
-	}
-
-	limit := pagination.Limit
 	if limit <= 0 || limit > len(keys) {
 		limit = len(keys)
 	}
 
-	offset := pagination.Offset
 	if offset < 0 || offset >= len(keys) {
 		offset = 0
 	}
