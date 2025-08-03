@@ -10,6 +10,7 @@ description = "TRML plugin for Wasserspiegel"
 api_key = { required = true }
 pegelonline_api_url = { default = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"}
 stations_store_name = { default = "stations" }
+measurement_db_name = { default = "measurements" }
 log_level = { default = "info" }
 
 [[trigger.http]]
@@ -61,4 +62,23 @@ stations_store_name = "{{ stations_store_name }}"
 api_key = "{{ api_key }}"
 log_level = "{{ log_level }}"
 
+[[trigger.http]]
+route = "/measurements/..."
+component = "search"
+
+[component.measurement]
+source = "app/measurement/main.wasm"
+sqlite_databases = ["measurements"]
+key_value_stores = []
+allowed_outbound_hosts = []
+
+[component.measurement.build]
+command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
+workdir = "app/measurement"
+watch = ["**/*.go", "go.mod"]
+
+[component.measurement.variables]
+measurements_db_name = "{{ measurement_db_name }}"
+api_key = "{{ api_key }}"
+log_level = "{{ log_level }}"
 

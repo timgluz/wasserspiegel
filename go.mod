@@ -5,6 +5,7 @@ go 1.24
 require (
 	github.com/gosimple/slug v1.15.0
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/sosodev/duration v1.3.1
 	github.com/spinframework/spin-go-sdk/v2 v2.2.1
 	github.com/stretchr/testify v1.10.0
 )

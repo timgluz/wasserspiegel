@@ -10,6 +10,7 @@ import (
 
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
 	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
+
 	"github.com/timgluz/wasserspiegel/middleware"
 	"github.com/timgluz/wasserspiegel/response"
 	"github.com/timgluz/wasserspiegel/secret"
@@ -34,7 +35,7 @@ var (
 type StationAppConfig struct {
 	StoreName   string `validate:"required"`
 	APIEndpoint string `validate:"required"`
-	ApiKey      string `validate:"required"` // Optional, if needed for authentication
+	APIKey      string `validate:"required"` // Optional, if needed for authentication
 }
 
 func NewStationAppConfigFromSpinVariables() (*StationAppConfig, error) {
@@ -56,7 +57,7 @@ func NewStationAppConfigFromSpinVariables() (*StationAppConfig, error) {
 	return &StationAppConfig{
 		StoreName:   storeName,
 		APIEndpoint: apiEndpoint,
-		ApiKey:      apiKey,
+		APIKey:      apiKey,
 	}, nil
 
 }
@@ -138,6 +139,7 @@ func init() {
 		appComponents, err := initSystemAppComponent(*config)
 		if err != nil {
 			fmt.Printf("Error initializing station service: %v\n", err)
+			response.RenderFatal(w, fmt.Errorf("failed to initialize station app"))
 			return
 		}
 		defer appComponents.Close()
@@ -178,12 +180,7 @@ func initSystemAppComponent(config StationAppConfig) (*stationAppComponent, erro
 	stationProvider := station.NewPegelOnlineProvider(config.APIEndpoint, spinHTTPClient, logger)
 
 	secretStore := secret.NewInMemoryStore()
-	if err != nil {
-		logger.Error("Failed to create secret store", "error", err)
-		return nil, fmt.Errorf("failed to create secret store: %w", err)
-	}
-
-	secretStore.Set(config.ApiKey, config.ApiKey)
+	secretStore.Set(config.APIKey, config.APIKey)
 
 	return &stationAppComponent{stationRepository, stationProvider, secretStore, logger}, nil
 }

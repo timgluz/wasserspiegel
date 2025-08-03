@@ -31,7 +31,7 @@ func RenderSuccess(w http.ResponseWriter, data []byte) {
 	_, _ = w.Write(data)
 }
 
-func RenderJSONResponse(w http.ResponseWriter, data interface{}) {
+func RenderJSON(w http.ResponseWriter, data interface{}) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		RenderFatal(w, fmt.Errorf("failed to marshal data: %w", err))
@@ -41,4 +41,9 @@ func RenderJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", JSONContentType)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(jsonData)
+}
+
+// TODO: remove ; used to migrate to new function to reduce stuttering
+func RenderJSONResponse(w http.ResponseWriter, data interface{}) {
+	RenderJSON(w, data)
 }

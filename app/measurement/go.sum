@@ -1,0 +1,6 @@
+github.com/julienschmidt/httprouter v1.3.0 h1:U0609e9tgbseu3rBINet9P48AI/D3oJs4dN7jwJOQ1U=
+github.com/julienschmidt/httprouter v1.3.0/go.mod h1:JR6WtHb+2LUe8TCKY3cZOxFyyO8IZAc4RVcycCCAKdM=
+github.com/sosodev/duration v1.3.1 h1:qtHBDMQ6lvMQsL15g4aopM4HEfOaYuhWBw3NPTtlqq4=
+github.com/sosodev/duration v1.3.1/go.mod h1:RQIBBX0+fMLc/D9+Jb/fwvVmo0eZvDDEERAikUR6SDg=
+github.com/spinframework/spin-go-sdk/v2 v2.2.1 h1:ceAbRU+D3xmyZ8ScDLeFoT763ikFIUEmSjgsrD11v8k=
+github.com/spinframework/spin-go-sdk/v2 v2.2.1/go.mod h1:vocVZB4qlTG8C5yoliKIAJCuv4x7sqK0GmVkWeD9N/A=

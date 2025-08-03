@@ -39,6 +39,17 @@ tasks:
       - spin build
     silent: true
 
+  migrate:
+    cmds:
+      - echo "Running measurement migrations..."
+      - "sqlite3 .spin/sqlite_db.db < app/measurement/migration.sql"
+      - echo "Migrations applied successfully."
+    silent: true
+    preconditions:
+      - sh: "test -f app/measurement/migration.sql"
+        msg: "Migration file app/measurement/migration.sql is required to run this task."
+      - sh: "test -f .spin/sqlite_db.db"
+        msg: ".spin/sqlite_db.db. directory is required to run this task."
   up:
     aliases:
       - run

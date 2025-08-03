@@ -2,3 +2,6 @@
 type = "spin"
 path = ".spin/stations.db"
 
+[sqlite_database.measurements]
+type = "spin"
+path = ".spin/measurements.db"
