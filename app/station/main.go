@@ -154,11 +154,9 @@ func init() {
 		logger.Info("Station AppComponents successfully initialized", "storeName", config.StoreName)
 
 		router := spinhttp.NewRouter()
-		router.POST("/stations/admin/seed", middleware.BearerAuth(newStationSeederHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations", middleware.BearerAuth(newStationsHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations/:id/waterlevel/", middleware.BearerAuth(newWaterLevelHandler(appComponents), appComponents.secretStore))
 		router.GET("/stations/:id", middleware.BearerAuth(newStationHandler(appComponents), appComponents.secretStore))
-
 		router.NotFound = response.NewNotFoundHandler(logger)
 
 		router.ServeHTTP(w, r)
@@ -207,7 +205,7 @@ func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandl
 		}
 
 		queryPagination.Total = len(stationCollection.Stations)
-		response.RenderJSONResponse(w, map[string]interface{}{
+		response.RenderJSON(w, map[string]interface{}{
 			"stations":   stationCollection.Stations,
 			"pagination": queryPagination,
 		})
@@ -253,7 +251,7 @@ func newStationHandler(appComponents *stationAppComponent) spinhttp.RouterHandle
 			WaterLevel: waterLevelCollection,
 		}
 
-		response.RenderJSONResponse(w, stationDashboard)
+		response.RenderJSON(w, stationDashboard)
 	}
 }
 
@@ -296,39 +294,6 @@ func newWaterLevelHandler(appComponents *stationAppComponent) spinhttp.RouterHan
 		}
 
 		response.RenderSuccess(w, jsonData)
-	}
-}
-
-func newStationSeederHandler(appComponents *stationAppComponent) spinhttp.RouterHandle {
-	return func(w http.ResponseWriter, r *http.Request, _ spinhttp.Params) {
-		logger := appComponents.logger
-
-		if !appComponents.IsReady() {
-			logger.Error("Station app components are not ready")
-			response.RenderFatal(w, fmt.Errorf("station app components are not ready"))
-			return
-		}
-
-		seeder := station.NewProviderSeeder(logger)
-		if seeder == nil {
-			logger.Error("Failed to create station seeder")
-			response.RenderFatal(w, fmt.Errorf("failed to create station seeder"))
-			return
-		}
-
-		logger.Info("Seeding stations from provider to repository")
-		err := seeder.Seed(context.Background(), appComponents.stationProvider, appComponents.stationRepository)
-		if err != nil {
-			logger.Error("Failed to seed stations", "error", err)
-			response.RenderFatal(w, err)
-			return
-		}
-
-		logger.Info("Successfully seeded stations")
-		response.RenderJSONResponse(w, APIResponse{
-			Success: true,
-			Message: "Stations seeded successfully",
-		})
 	}
 }
 

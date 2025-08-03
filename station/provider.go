@@ -19,5 +19,7 @@ type Provider interface {
 	GetStations(ctx context.Context) (*StationCollection, error)
 	GetStation(ctx context.Context, id string) (*Station, error)
 	GetStationWaterLevel(ctx context.Context, id string) (*WaterLevelCollection, error)
+
 	IsReady() bool
+	Close() error
 }

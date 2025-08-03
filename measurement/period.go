@@ -24,9 +24,16 @@ func (p *Period) IsValid() bool {
 	return p.Start < p.End
 }
 
-func NewFromISO8601Duration(iso8601 string) (*Period, error) {
+func (p *Period) String() string {
+	dtDuration := time.Unix(int64(p.End), 0).Sub(time.Unix(int64(p.Start), 0))
+
+	isoDuration := duration.FromTimeDuration(dtDuration)
+	return isoDuration.String()
+}
+
+func NewFromISO8601Duration(periodStr string) (*Period, error) {
 	end := CurrentEpoch() // Use current epoch as the end time
-	start, err := ParseISO8601Duration(iso8601, end)
+	start, err := ParseISO8601Duration(periodStr, end)
 	if err != nil {
 		return nil, err
 	}
@@ -66,4 +73,13 @@ func ParseISO8601Duration(iso8601 string, until Epoch) (Epoch, error) {
 	}
 
 	return start, nil
+}
+
+func ParseRFC3339(timestamp string) (Epoch, error) {
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse RFC3339 timestamp: %w", err)
+	}
+
+	return Epoch(t.Unix()), nil
 }

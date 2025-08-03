@@ -9,7 +9,7 @@ type Store interface {
 	Get(key string) (string, error)
 	// Set stores a secret with the given key and value.
 	Set(key, value string) error
-
+	IsReady() bool
 	Close() error
 }
 
@@ -40,6 +40,11 @@ func (s *InMemoryStore) Set(key, value string) error {
 	}
 	s.secrets[key] = value
 	return nil
+}
+
+func (s *InMemoryStore) IsReady() bool {
+	// In-memory store is always ready as long as it is initialized
+	return s != nil && s.secrets != nil
 }
 
 func (s *InMemoryStore) Close() error {

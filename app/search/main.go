@@ -10,6 +10,7 @@ import (
 
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
 	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
+	"github.com/timgluz/wasserspiegel/log"
 	"github.com/timgluz/wasserspiegel/middleware"
 	"github.com/timgluz/wasserspiegel/response"
 	"github.com/timgluz/wasserspiegel/secret"
@@ -25,11 +26,11 @@ const (
 
 type SearchAppConfig struct {
 	StationStoreName string `json:"station_store_name"`
-	ApiKey           string
+	APIKey           string
 	LogLevel         string `json:"log_level"`
 }
 
-func NewSearchAppConfigFromSpinVariables() (*SearchAppConfig, error) {
+func newSearchAppConfigFromSpinVariables() (*SearchAppConfig, error) {
 	stationStoreName, err := spinvars.Get("stations_store_name")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stations_store_name: %w", err)
@@ -42,7 +43,7 @@ func NewSearchAppConfigFromSpinVariables() (*SearchAppConfig, error) {
 
 	return &SearchAppConfig{
 		StationStoreName: stationStoreName,
-		ApiKey:           apiKey,
+		APIKey:           apiKey,
 	}, nil
 }
 
@@ -53,7 +54,7 @@ type SearchResponse struct {
 
 func init() {
 	spinhttp.Handle(func(w http.ResponseWriter, r *http.Request) {
-		config, err := NewSearchAppConfigFromSpinVariables()
+		config, err := newSearchAppConfigFromSpinVariables()
 		if err != nil {
 			response.RenderFatal(w, fmt.Errorf("failed to load station app configuration: %w", err))
 			return
@@ -62,6 +63,7 @@ func init() {
 		appComponents, err := initSearchAppComponent(*config)
 		if err != nil {
 			fmt.Printf("Error initializing station service: %v\n", err)
+			response.RenderFatal(w, fmt.Errorf("failed to initialize station app components"))
 			return
 		}
 		defer appComponents.Close()
@@ -86,7 +88,7 @@ func init() {
 
 func initSearchAppComponent(config SearchAppConfig) (*searchAppComponent, error) {
 	loggerOptions := slog.HandlerOptions{
-		Level: slogLevelInfoFromString(config.LogLevel),
+		Level: log.SlogLevelInfoFromString(config.LogLevel),
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &loggerOptions)).With("component", "search")
 
@@ -105,7 +107,7 @@ func initSearchAppComponent(config SearchAppConfig) (*searchAppComponent, error)
 		return nil, fmt.Errorf("failed to create secret store: %w", err)
 	}
 
-	secretStore.Set(config.ApiKey, config.ApiKey)
+	secretStore.Set(config.APIKey, config.APIKey)
 
 	return &searchAppComponent{
 		logger:            logger,
@@ -208,19 +210,4 @@ func (c *searchAppComponent) Close() error {
 
 	c.logger.Info("SearchAppComponent closed successfully")
 	return nil
-}
-
-func slogLevelInfoFromString(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "info":
-		return slog.LevelInfo
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo // Default to Info level if not recognized
-	}
 }

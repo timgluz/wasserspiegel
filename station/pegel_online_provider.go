@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const PegelOnlineProviderName = "pegelonline"
@@ -23,6 +24,13 @@ type PegelOnlineStation struct {
 	Water     StationWater `json:"water"`
 }
 
+type PegelOnlineMeasurement struct {
+	Timestamp string  `json:"timestamp"`
+	Value     float64 `json:"value"`
+}
+
+type PegelOnlineMeasurementList []PegelOnlineMeasurement
+
 type PegelOnlineProvider struct {
 	HTTPProvider
 
@@ -34,6 +42,12 @@ type PegelOnlineProvider struct {
 type StationWater struct {
 	LongName  string `json:"longname"`
 	ShortName string `json:"shortname"`
+}
+
+func NewHTTPClientWithTimeout(timeout int) *http.Client {
+	return &http.Client{
+		Timeout: time.Duration(timeout) * time.Second,
+	}
 }
 
 func NewPegelOnlineProvider(apiEndpoint string, client *http.Client, logger *slog.Logger) *PegelOnlineProvider {
@@ -119,23 +133,56 @@ func (p *PegelOnlineProvider) GetStationWaterLevel(ctx context.Context, id strin
 
 	period := DefaultTimePeriod // Default period is 15 days
 	resourceURL := fmt.Sprintf("%s/stations/%s/W/measurements.json?start=%s", p.APIEndpoint, id, period)
+
+	p.logger.Debug("Fetching water level for station", "id", id, "resourceURL", resourceURL)
 	jsonContent, err := p.RetrieveContent(ctx, resourceURL)
 	if err != nil {
 		return nil, err
 	}
 
-	measurements := MeasurementList{}
-	if err := json.NewDecoder(jsonContent).Decode(&measurements); err != nil {
+	pegelOnlineMeasurements := make([]PegelOnlineMeasurement, 0)
+	if err := json.NewDecoder(jsonContent).Decode(&pegelOnlineMeasurements); err != nil {
 		return nil, ErrUnmarshalFailed
+	}
+
+	if len(pegelOnlineMeasurements) == 0 {
+		p.logger.Warn("No measurements found for station", "id", id)
+		return &WaterLevelCollection{
+			StationID:    id,
+			Start:        period, // Default start period
+			Measurements: []Measurement{},
+			Unit:         UnitCM,
+		}, nil
+	}
+
+	measurements, err := mapPegelOnlineMeasurementsToMeasurement(pegelOnlineMeasurements)
+	if err != nil {
+		p.logger.Error("Failed to map PegelOnline measurements", "error", err)
+		return nil, fmt.Errorf("failed to map PegelOnline measurements: %w", err)
 	}
 
 	p.logger.Info("Successfully fetched water level for station", "id", id)
 	return &WaterLevelCollection{
 		StationID:    id,
-		Start:        DefaultTimePeriod, // Default start period
+		Start:        period, // Default start period
 		Measurements: measurements,
+		Unit:         UnitCM,
 	}, nil
 
+}
+
+// Close closes the HTTP client connection.
+func (p *PegelOnlineProvider) Close() error {
+	if p.client == nil {
+		p.logger.Warn("HTTP client is already nil, nothing to close")
+		return nil
+	}
+
+	//p.logger.Info("Closing HTTP client connections for PegelOnlineProvider")
+	//p.client.CloseIdleConnections()
+	p.logger.Info("HTTP client connections closed")
+	p.client = nil // Clear the client to prevent further use
+	return nil
 }
 
 func mapStations(stations PegelOnlineStationList) (*StationCollection, error) {
@@ -177,6 +224,19 @@ func mapStation(station PegelOnlineStation) (*Station, error) {
 			{Name: PegelOnlineProviderName, ID: station.UUID},
 		},
 	}, nil
+}
+
+func mapPegelOnlineMeasurementsToMeasurement(measurements PegelOnlineMeasurementList) ([]Measurement, error) {
+	items := make([]Measurement, 0, len(measurements))
+	for i := range measurements {
+		m := measurements[i]
+		items = append(items, Measurement{
+			Timestamp: m.Timestamp,
+			Value:     m.Value,
+		})
+	}
+
+	return items, nil
 }
 
 func toCapitalize(s string) string {

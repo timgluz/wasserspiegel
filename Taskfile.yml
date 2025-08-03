@@ -39,17 +39,18 @@ tasks:
       - spin build
     silent: true
 
-  migrate:
+  "measurement:db:create":
     cmds:
-      - echo "Running measurement migrations..."
-      - "sqlite3 .spin/sqlite_db.db < app/measurement/migration.sql"
-      - echo "Migrations applied successfully."
+      - echo "Creating measurement database..."
+      - mkdir -p .spin
+      - "sqlite3 .spin/measurements.db < app/measurement/schema.sql"
+      - echo "Measurement database created successfully."
     silent: true
     preconditions:
-      - sh: "test -f app/measurement/migration.sql"
-        msg: "Migration file app/measurement/migration.sql is required to run this task."
-      - sh: "test -f .spin/sqlite_db.db"
-        msg: ".spin/sqlite_db.db. directory is required to run this task."
+      - sh: "test -f app/measurement/schema.sql"
+        msg: "Schema file app/measurement/schema.sql is required to run this task."
+      - sh: "test ! -f .spin/measurements.db"
+        msg: ".spin/measurements.db already exists. Please remove it before running this task."
   up:
     aliases:
       - run

@@ -26,6 +26,10 @@ func (s Station) GetExternalID(name string) (string, bool) {
 	return "", false
 }
 
+func (s Station) GetPegelOnlineID() (string, bool) {
+	return s.GetExternalID(PegelOnlineProviderName)
+}
+
 type ExternalID struct {
 	Name string `json:"name"`
 	ID   string `json:"id"`

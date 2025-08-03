@@ -1,5 +1,11 @@
 package measurement
 
+import (
+	"strings"
+
+	"github.com/gosimple/slug"
+)
+
 type Epoch int64
 
 type Measurement struct {
@@ -7,6 +13,12 @@ type Measurement struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"` // Optional field for additional info
 	Unit        string `json:"unit"`                  // Unit of measurement (e.g., "Celsius", "Pascal", "liters")
+}
+
+func NewMeasurementName(keys ...string) string {
+	// Create a measurement name by joining the keys with a hyphen
+	// This is useful for creating unique measurement names based on multiple keys
+	return slug.Make(strings.Join(keys, "-"))
 }
 
 type Sample struct {

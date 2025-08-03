@@ -19,8 +19,7 @@ type SQLRepository struct {
 }
 
 func NewSpinSqliteDB(dbName string) (*sql.DB, error) {
-	// Open the SQLite database
-	db := sqlite.Open("dbName")
+	db := sqlite.Open(dbName)
 	// Check if the database is reachable
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping SQLite DB: %w", err)
@@ -79,31 +78,43 @@ func (r *SQLRepository) AddTimeseries(ctx context.Context, timeseries *Timeserie
 		return fmt.Errorf("timeseries cannot be nil")
 	}
 
+	measurementName := timeseries.Name
+	if measurementName == "" {
+		r.logger.Error("Cannot add timeseries with empty name")
+		return fmt.Errorf("timeseries name cannot be empty")
+	}
+
 	// Ensure the measurement exists or create it
-	ok, err := r.hasMeasurement(timeseries.Name)
+	ok, err := r.hasMeasurement(measurementName)
 	if err != nil {
-		r.logger.Error("Failed to get measurement by name", "name", timeseries.Name, "error", err)
+		r.logger.Error("Failed to get measurement by name", "name", measurementName, "error", err)
 		return err
 	}
 
 	if !ok {
+		if timeseries.Measurement == nil {
+			r.logger.Error("Measurement is nil for timeseries", "name", measurementName)
+			return fmt.Errorf("measurement cannot be nil for timeseries")
+		}
+
+		r.logger.Info("Measurement does not exist, creating new one", "name", measurementName)
 		if err := r.AddMeasurement(ctx, timeseries.Measurement); err != nil {
 			r.logger.Error("Failed to add measurement", "measurement", timeseries.Measurement, "error", err)
 			return err
 		}
-		r.logger.Info("Measurement added", "measurement", timeseries.Measurement)
+		r.logger.Info("Measurement added", "measurement", measurementName)
 	}
 
 	// Retrieve the measurement ID
-	measurement, err := r.getMeasurementByName(timeseries.Name)
+	measurement, err := r.getMeasurementByName(measurementName)
 	if err != nil {
-		r.logger.Error("Failed to get measurement by name", "name", timeseries.Name, "error", err)
+		r.logger.Error("Failed to get measurement by name", "name", measurementName, "error", err)
 		return err
 	}
 
 	if measurement == nil {
-		r.logger.Error("Measurement not found after adding", "name", timeseries.Name)
-		return fmt.Errorf("measurement not found after adding: %s", timeseries.Name)
+		r.logger.Error("Measurement not found after adding", "name", measurementName)
+		return fmt.Errorf("measurement not found after adding: %s", measurementName)
 	}
 
 	// Insert samples into the database
@@ -216,7 +227,7 @@ func (r *SQLRepository) GetMeasurements(ctx context.Context) ([]Measurement, err
 
 // GetMeasurementByID retrieves a measurement by its ID.
 func (r *SQLRepository) getMeasurementByName(id string) (*Measurement, error) {
-	query := `SELECT id, name, unit FROM measurements WHERE id = ?`
+	query := `SELECT id, name, unit FROM measurements WHERE name = ?`
 	row := r.db.QueryRow(query, id)
 
 	var measurement Measurement
@@ -233,7 +244,7 @@ func (r *SQLRepository) getMeasurementByName(id string) (*Measurement, error) {
 }
 
 func (r *SQLRepository) hasSample(measurementID int64, timestamp Epoch) (bool, error) {
-	query := `SELECT COUNT(*) FROM samples WHERE measurement_id = ? AND timestamp = ?`
+	query := `SELECT COUNT(*) FROM samples WHERE measurement_id = ? AND ts = ?`
 	row := r.db.QueryRow(query, measurementID, timestamp)
 
 	var count int
@@ -249,6 +260,11 @@ func (r *SQLRepository) hasSample(measurementID int64, timestamp Epoch) (bool, e
 
 // addSample adds a sample to the database.
 func (r *SQLRepository) addSample(measurementID int64, sample Sample) error {
+	if sample.Timestamp == 0 {
+		r.logger.Error("Sample timestamp is zero, cannot insert", "sample", sample)
+		return fmt.Errorf("sample timestamp cannot be zero")
+	}
+
 	ok, err := r.hasSample(measurementID, sample.Timestamp)
 	if err != nil {
 		r.logger.Error("Failed to check if sample exists", "measurement_id", measurementID, "timestamp", sample.Timestamp, "error", err)
@@ -260,8 +276,9 @@ func (r *SQLRepository) addSample(measurementID int64, sample Sample) error {
 		return nil // Sample already exists, no need to insert
 	}
 
-	query := `INSERT INTO samples (measurement_id, value, timestamp) VALUES (?, ?, ?)`
-	if _, err := r.db.Exec(query, measurementID, sample.Value, sample.Timestamp); err != nil {
+	fmt.Println("Adding sample to database", "measurement_id", measurementID, "timestamp", sample.Timestamp, "value", sample.Value)
+	query := `INSERT INTO samples (measurement_id, value, ts) VALUES (?, ?, ?)`
+	if _, err := r.db.Exec(query, measurementID, sample.Value, int64(sample.Timestamp)); err != nil {
 		r.logger.Error("Failed to insert sample", "sample", sample, "error", err)
 		return err
 	}
@@ -272,11 +289,11 @@ func (r *SQLRepository) addSample(measurementID int64, sample Sample) error {
 
 func (r *SQLRepository) getSampleSpanByMeasurementID(measurementID int64) ([]Sample, error) {
 	query := `
-SELECT id, measurement_id, value, timestamp
+SELECT id, measurement_id, value, ts
 FROM samples
 WHERE measurement_id = ?
-	AND timestamp >= ? AND timestamp <= ?
-ORDER BY timestamp ASC`
+	AND ts >= ? AND ts <= ?
+ORDER BY ts ASC`
 
 	rows, err := r.db.Query(query, measurementID)
 	if err != nil {
