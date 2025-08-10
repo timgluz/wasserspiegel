@@ -10,6 +10,7 @@ description = "TRML plugin for Wasserspiegel"
 api_key = { required = true }
 pegelonline_api_url = { default = "https://www.pegelonline.wsv.de/webservices/rest-api/v2"}
 stations_store_name = { default = "stations" }
+dashboard_store_name = { default = "dashboards" }
 measurement_db_name = { default = "measurements" }
 
 log_level = { default = "info" }
@@ -84,20 +85,33 @@ api_key = "{{ api_key }}"
 log_level = "{{ log_level }}"
 
 [[trigger.http]]
+route = "/dashboards/..."
+component = "dashboard"
+[component.dashboard]
+source = "app/dashboard/main.wasm"
+key_value_stores = ["dashboards"]
+allowed_outbound_hosts = []
+[component.dashboard.build]
+command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
+workdir = "app/dashboard"
+watch = ["**/*.go", "go.mod"]
+[component.dashboard.variables]
+dashboard_store_name = "{{ dashboard_store_name }}"
+api_key = "{{ api_key }}"
+log_level = "debug"
+
+[[trigger.http]]
 route = "/tasks/..."
 component = "task"
-
 [component.task]
 source = "app/task/main.wasm"
 sqlite_databases = ["measurements"]
 key_value_stores = ["stations"]
 allowed_outbound_hosts = ["https://www.pegelonline.wsv.de"]
-
 [component.task.build]
 command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
 workdir = "app/task"
 watch = ["**/*.go", "go.mod"]
-
 [component.task.variables]
 measurement_db_name = "{{ measurement_db_name }}"
 station_store_name = "{{ stations_store_name }}"

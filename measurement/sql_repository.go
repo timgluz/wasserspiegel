@@ -142,7 +142,7 @@ func (r *SQLRepository) GetTimeseries(ctx context.Context, measurementName strin
 		return nil, nil // Measurement not found
 	}
 
-	samples, err := r.getSampleSpanByMeasurementID(measurement.ID)
+	samples, err := r.getSampleSpanByMeasurementID(measurement.ID, period.Start, period.End)
 	if err != nil {
 		r.logger.Error("Failed to get samples for measurement", "measurement_id", measurement.ID, "error", err)
 		return nil, err
@@ -244,8 +244,8 @@ func (r *SQLRepository) getMeasurementByName(id string) (*Measurement, error) {
 }
 
 func (r *SQLRepository) hasSample(measurementID int64, timestamp Epoch) (bool, error) {
-	query := `SELECT COUNT(*) FROM samples WHERE measurement_id = ? AND ts = ?`
-	row := r.db.QueryRow(query, measurementID, timestamp)
+	query := `SELECT COUNT(1) FROM samples WHERE measurement_id = ? AND ts = ?`
+	row := r.db.QueryRow(query, measurementID, int64(timestamp))
 
 	var count int
 	if err := row.Scan(&count); err != nil {
@@ -287,7 +287,7 @@ func (r *SQLRepository) addSample(measurementID int64, sample Sample) error {
 	return nil
 }
 
-func (r *SQLRepository) getSampleSpanByMeasurementID(measurementID int64) ([]Sample, error) {
+func (r *SQLRepository) getSampleSpanByMeasurementID(measurementID int64, startAt, endAt Epoch) ([]Sample, error) {
 	query := `
 SELECT id, measurement_id, value, ts
 FROM samples
@@ -295,7 +295,7 @@ WHERE measurement_id = ?
 	AND ts >= ? AND ts <= ?
 ORDER BY ts ASC`
 
-	rows, err := r.db.Query(query, measurementID)
+	rows, err := r.db.Query(query, measurementID, int64(startAt), int64(endAt))
 	if err != nil {
 		r.logger.Error("Failed to query samples", "error", err)
 		return nil, err

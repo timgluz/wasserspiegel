@@ -2,6 +2,11 @@
 type = "spin"
 path = ".spin/stations.db"
 
+[key_value_store.dashboards]
+type = "spin"
+path = ".spin/dashboards.db"
+
+
 [sqlite_database.default]
 type = "spin"
 path = ".spin/sqlite_db.db"
