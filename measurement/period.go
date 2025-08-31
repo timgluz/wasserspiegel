@@ -83,3 +83,7 @@ func ParseRFC3339(timestamp string) (Epoch, error) {
 
 	return Epoch(t.Unix()), nil
 }
+
+func CurrentUnix() int64 {
+	return time.Now().Unix()
+}

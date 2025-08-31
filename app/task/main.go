@@ -9,6 +9,7 @@ import (
 	spinhttp "github.com/spinframework/spin-go-sdk/v2/http"
 	spinvars "github.com/spinframework/spin-go-sdk/v2/variables"
 
+	"github.com/timgluz/wasserspiegel/dashboard"
 	"github.com/timgluz/wasserspiegel/log"
 	"github.com/timgluz/wasserspiegel/measurement"
 	"github.com/timgluz/wasserspiegel/middleware"
@@ -19,22 +20,27 @@ import (
 )
 
 type taskAppConfig struct {
-	MeasurementDBName string `json:"measurement_db_name"`
-	StationStoreName  string `json:"station_store_name"` // e.g., "stations_store"
-	APIEndpoint       string `json:"api_endpoint"`       // e.g., "https://api.pegelonline.wsv.de"
+	MeasurementDBName  string `json:"measurement_db_name"`
+	StationStoreName   string `json:"station_store_name"` // e.g., "stations_store"
+	DashboardStoreName string `json:"dashboard_store_name"`
+
+	APIEndpoint       string `json:"api_endpoint"` // e.g., "https://api.pegelonline.wsv.de"
 	APIKey            string `json:"api_key"`
 	ConnectionTimeout int    `json:"connection_timeout"` // in seconds
 
 	LogLevel string `json:"log_level"`
 }
 
-type taskAppComponents struct {
+type taskApp struct {
 	config taskAppConfig
 
 	measurementRepository measurement.Repository
+	dashboardRepository   dashboard.Repository
 	stationRepository     station.Repository
-	stationProvider       station.Provider
-	secretStore           secret.Store
+
+	stationProvider station.Provider
+	secretStore     secret.Store
+	router          *spinhttp.Router
 
 	logger *slog.Logger
 }
@@ -47,42 +53,63 @@ func init() {
 			return
 		}
 
-		appComponents, err := initTaskAppComponents(*config)
+		app, err := initTaskApp(*config)
 		if err != nil {
 			fmt.Println("Error initializing task app components:", err)
 			response.RenderFatal(w, fmt.Errorf("failed to initialize task app components"))
 			return
 		}
-		defer appComponents.Close()
+		defer app.Close()
 
-		if !appComponents.IsReady() {
+		if !app.IsReady() {
 			fmt.Println("Task app components are not ready")
 			response.RenderFatal(w, fmt.Errorf("task app components are not ready"))
 			return
 		}
 
-		logger := appComponents.logger
-		logger.Info("Task app components initialized successfully", "MeasurementDBName", config.MeasurementDBName)
+		router := newTaskRouter(app)
 
-		router := spinhttp.NewRouter()
-		router.GET("/tasks/collectStationMeasurements", middleware.BearerAuth(newCollectStationMeasurementsHandler(appComponents), appComponents.secretStore))
-
-		router.NotFound = response.NewNotFoundHandler(logger)
 		router.ServeHTTP(w, r)
 	})
 }
 
 func main() {}
 
-func newCollectStationMeasurementsHandler(appComponents *taskAppComponents) spinhttp.RouterHandle {
+func newTaskRouter(app *taskApp) *spinhttp.Router {
+	router := spinhttp.NewRouter()
+	router.GET("/tasks/collectStationMeasurements", newCollectStationMeasurementsInfoHandler())
+	router.POST("/tasks/collectStationMeasurements", middleware.BearerAuth(newCollectStationMeasurementsHandler(app), app.secretStore))
+	router.GET("/tasks/buildDashboard", newBuildDashboardInfoHandler())
+	router.POST("/tasks/buildDashboard", middleware.BearerAuth(newBuildDashboardHandler(app), app.secretStore))
+
+	router.NotFound = response.NewNotFoundHandler(app.logger)
+	return router
+}
+
+// TODO: check if it would be possible to use OPENAPI spec to generate this documentation
+func newCollectStationMeasurementsInfoHandler() spinhttp.RouterHandle {
+	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
+		helpMessage := `Use POST method to collect water level measurements for a station.
+Required query parameters:
+- station_id (string): The ID of the station to collect measurements for.
+Optional query parameters:
+- period (ISO 8601 duration, e.g., P3D for 3 days): The time period for which to collect measurements. Default is P3D (3 days) if not provided.`
+
+		response.RenderJSON(w,
+			response.NewAPIDocumentationResponse("Collect Station Measurements Info", helpMessage),
+		)
+	}
+}
+
+func newCollectStationMeasurementsHandler(app *taskApp) spinhttp.RouterHandle {
 	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
 		ctx := r.Context()
-		logger := appComponents.logger
+		logger := app.logger
 
 		// Example: Fetching a specific station ID from the request
 		stationID := r.URL.Query().Get("station_id")
 		if stationID == "" {
-			response.RenderError(w, fmt.Errorf("station_id is required"), http.StatusBadRequest)
+			response.RenderError(w, fmt.Errorf("station id is required"), http.StatusBadRequest)
 			return
 		}
 
@@ -99,12 +126,12 @@ func newCollectStationMeasurementsHandler(appComponents *taskAppComponents) spin
 		}
 
 		logger.Info("Collecting water level measurements", "stationID", stationID, "period", timePeriod.String())
-		task := task.NewStationWaterLevelCollector(appComponents.measurementRepository,
-			appComponents.stationRepository,
-			appComponents.stationProvider,
+		job := task.NewStationWaterLevelCollector(app.measurementRepository,
+			app.stationRepository,
+			app.stationProvider,
 			logger,
 		)
-		if err := task.Run(ctx, stationID, *timePeriod); err != nil {
+		if err := job.Run(ctx, stationID, *timePeriod); err != nil {
 			logger.Error("Failed to collect water level measurements", "error", err)
 			response.RenderError(w, fmt.Errorf("failed to collect water level measurements: %w", err), http.StatusInternalServerError)
 			return
@@ -114,10 +141,69 @@ func newCollectStationMeasurementsHandler(appComponents *taskAppComponents) spin
 	}
 }
 
+func newBuildDashboardInfoHandler() spinhttp.RouterHandle {
+	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
+		helpMessage := `Use POST method to build a dashboard for a station.
+Required query parameters:
+- station_id (string): The ID of the station to build the dashboard for.
+Optional query parameters:
+- language_code (string): The language code for the dashboard (e.g., "en",
+  "de"). Default is "en" if not provided.
+- timezone (string): The timezone for the dashboard (e.g., "utc", "Europe/Berlin").
+  Default is "utc" if not provided.`
+
+		response.RenderJSON(w,
+			response.NewAPIDocumentationResponse("Build Dashboard Info", helpMessage),
+		)
+	}
+}
+
+func newBuildDashboardHandler(app *taskApp) spinhttp.RouterHandle {
+	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
+		ctx := r.Context()
+		logger := app.logger
+
+		stationID := r.URL.Query().Get("station_id")
+		if stationID == "" {
+			response.RenderError(w, fmt.Errorf("station_id is required"), http.StatusBadRequest)
+			return
+		}
+
+		builderOptions := task.NewDefaultDashboardBuilderOptions(stationID)
+
+		if languageCode := r.URL.Query().Get("language_code"); languageCode != "" {
+			builderOptions.LanguageCode = languageCode
+		}
+
+		if timezone := r.URL.Query().Get("timezone"); timezone != "" {
+			builderOptions.Timezone = timezone
+		}
+
+		logger.Info("Building dashboard", "stationID", stationID, "languageCode", builderOptions.LanguageCode, "timezone", builderOptions.Timezone)
+		job := task.NewDashboardBuilder(app.stationRepository,
+			app.dashboardRepository,
+			app.measurementRepository,
+			logger,
+		)
+		if err := job.Run(ctx, builderOptions); err != nil {
+			logger.Error("Failed to build dashboard", "error", err)
+			response.RenderError(w, fmt.Errorf("failed to build dashboard: %w", err), http.StatusInternalServerError)
+			return
+		}
+
+		response.RenderJSON(w, response.NewPostResponse(true, "Dashboard successfully built: "+stationID, builderOptions))
+	}
+}
+
 func newTaskAppConfigFromSpinVariables() (*taskAppConfig, error) {
 	measurementDBName, err := spinvars.Get("measurement_db_name")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get measurement_db_name: %w", err)
+	}
+
+	dashboardStoreName, err := spinvars.Get("dashboard_store_name")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get dashboard_store_name: %w", err)
 	}
 
 	stationStoreName, err := spinvars.Get("station_store_name")
@@ -141,16 +227,17 @@ func newTaskAppConfigFromSpinVariables() (*taskAppConfig, error) {
 	}
 
 	return &taskAppConfig{
-		MeasurementDBName: measurementDBName,
-		StationStoreName:  stationStoreName,
-		APIEndpoint:       apiEndpoint,
-		APIKey:            apiKey,
-		ConnectionTimeout: 10, // Default to 10 seconds if not set
-		LogLevel:          logLevel,
+		MeasurementDBName:  measurementDBName,
+		DashboardStoreName: dashboardStoreName,
+		StationStoreName:   stationStoreName,
+		APIEndpoint:        apiEndpoint,
+		APIKey:             apiKey,
+		ConnectionTimeout:  10, // Default to 10 seconds if not set
+		LogLevel:           logLevel,
 	}, nil
 }
 
-func initTaskAppComponents(config taskAppConfig) (*taskAppComponents, error) {
+func initTaskApp(config taskAppConfig) (*taskApp, error) {
 	loggerOptions := &slog.HandlerOptions{
 		Level: log.SlogLevelInfoFromString(config.LogLevel),
 	}
@@ -173,6 +260,11 @@ func initTaskAppComponents(config taskAppConfig) (*taskAppComponents, error) {
 		return nil, fmt.Errorf("failed to create station repository: %w", err)
 	}
 
+	dashboardRepo, err := dashboard.NewSpinKVRepository(config.DashboardStoreName, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dashboard repository: %w", err)
+	}
+
 	httpClient := spinhttp.NewClient()
 	stationProvider := station.NewPegelOnlineProvider(config.APIEndpoint, httpClient, logger)
 
@@ -182,9 +274,10 @@ func initTaskAppComponents(config taskAppConfig) (*taskAppComponents, error) {
 	}
 	secretStore.Set(config.APIKey, config.APIKey)
 
-	return &taskAppComponents{
+	return &taskApp{
 		config:                config,
 		measurementRepository: measurementRepository,
+		dashboardRepository:   dashboardRepo,
 		stationRepository:     stationRepo,
 		stationProvider:       stationProvider,
 		secretStore:           secretStore,
@@ -192,7 +285,7 @@ func initTaskAppComponents(config taskAppConfig) (*taskAppComponents, error) {
 	}, nil
 }
 
-func (c *taskAppComponents) IsReady() bool {
+func (c *taskApp) IsReady() bool {
 	if c.logger == nil {
 		fmt.Println("Logger of task app components is not initialized")
 		return false
@@ -200,6 +293,11 @@ func (c *taskAppComponents) IsReady() bool {
 
 	if c.measurementRepository == nil || !c.measurementRepository.IsReady() {
 		c.logger.Error("Measurement repository is not initialized or not ready")
+		return false
+	}
+
+	if c.dashboardRepository == nil || !c.dashboardRepository.IsReady() {
+		c.logger.Error("Dashboard repository is not initialized or not ready")
 		return false
 	}
 
@@ -221,32 +319,34 @@ func (c *taskAppComponents) IsReady() bool {
 	return true
 }
 
-func (c *taskAppComponents) Close() error {
+func (c *taskApp) Close() error {
 	if c.measurementRepository != nil {
 		if err := c.measurementRepository.Close(); err != nil {
 			c.logger.Error("Failed to close measurement repository", "error", err)
-			return err
+		}
+	}
+
+	if c.dashboardRepository != nil {
+		if err := c.dashboardRepository.Close(); err != nil {
+			c.logger.Error("Failed to close dashboard repository", "error", err)
 		}
 	}
 
 	if c.stationRepository != nil {
 		if err := c.stationRepository.Close(); err != nil {
 			c.logger.Error("Failed to close station repository", "error", err)
-			return err
 		}
 	}
 
 	if c.stationProvider != nil {
 		if err := c.stationProvider.Close(); err != nil {
 			c.logger.Error("Failed to close station provider", "error", err)
-			return err
 		}
 	}
 
 	if c.secretStore != nil {
 		if err := c.secretStore.Close(); err != nil {
 			c.logger.Error("Failed to close secret store", "error", err)
-			return err
 		}
 	}
 

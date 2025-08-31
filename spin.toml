@@ -106,7 +106,7 @@ component = "task"
 [component.task]
 source = "app/task/main.wasm"
 sqlite_databases = ["measurements"]
-key_value_stores = ["stations"]
+key_value_stores = ["stations", "dashboards"]
 allowed_outbound_hosts = ["https://www.pegelonline.wsv.de"]
 [component.task.build]
 command = "go mod tidy && tinygo build -target=wasip1 -gc=leaking -buildmode=c-shared -no-debug -o main.wasm ."
@@ -114,6 +114,7 @@ workdir = "app/task"
 watch = ["**/*.go", "go.mod"]
 [component.task.variables]
 measurement_db_name = "{{ measurement_db_name }}"
+dashboard_store_name = "{{ dashboard_store_name }}"
 station_store_name = "{{ stations_store_name }}"
 api_endpoint = "{{ pegelonline_api_url }}"
 api_key = "{{ api_key }}"

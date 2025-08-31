@@ -43,7 +43,7 @@ func newDashboardAppConfigFromSpinVariables() *DashboardAppConfig {
 
 	logLevel, err := spinvars.Get("log_level")
 	if err != nil {
-		return nil
+		logLevel = "info"
 	}
 
 	return &DashboardAppConfig{
@@ -85,7 +85,7 @@ func initDashboardApp() (*DashboardApp, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dashboard repository: %w", err)
 	}
-	router := newDashboardRouter(newDashboardGetHandler(dashboardRepo, logger), secretStore, logger)
+	router := newDashboardRouter(dashboardRepo, secretStore, logger)
 	if router == nil {
 		return nil, fmt.Errorf("failed to create dashboard router")
 	}
@@ -100,34 +100,31 @@ func initDashboardApp() (*DashboardApp, error) {
 
 }
 
-func newDashboardRouter(dashboardGetHandler spinhttp.RouterHandle, secretStore secret.Store, logger *slog.Logger) *spinhttp.Router {
-	fmt.Println("Creating dashboard router")
-
-	if dashboardGetHandler == nil {
-		logger.Error("Dashboard get handler is not initialized")
-		return nil
-	}
+func newDashboardRouter(dashboardRepo dashboard.Repository, secretStore secret.Store, logger *slog.Logger) *spinhttp.Router {
 
 	router := spinhttp.NewRouter()
-	router.GET("/dashboards/:id", middleware.BearerAuth(dashboardGetHandler, secretStore))
-	router.GET("/dashboards", newDashboardIndexHandler(logger))
+	router.GET("/dashboards/:id", middleware.BearerAuth(newDashboardGetHandler(dashboardRepo, logger), secretStore))
+	router.GET("/dashboards", middleware.BearerAuth(newDashboardIndexHandler(dashboardRepo, logger), secretStore))
 
 	router.NotFound = response.NewNotFoundHandler(logger)
 
 	return router
 }
 
-func newDashboardIndexHandler(logger *slog.Logger) spinhttp.RouterHandle {
+func newDashboardIndexHandler(dashboardRepo dashboard.Repository, logger *slog.Logger) spinhttp.RouterHandle {
 	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
-		fmt.Println("Handling dashboard index request")
-		// Here you would typically fetch the list of dashboards from the repository
-		// For now, we will just return a placeholder response
-		dashboards := []dashboard.Dashboard{
-			{ID: "1", Name: "Dashboard 1"},
-			{ID: "2", Name: "Dashboard 2"},
+		pagination := response.NewPaginationFromRequest(r)
+		logger.Info("Handling dashboard index request", "limit", pagination.Limit, "offset", pagination.Offset)
+		dashboards, err := dashboardRepo.List(r.Context(), pagination.Offset, pagination.Limit)
+		if err != nil {
+			logger.Error("Failed to list dashboards", "error", err)
+			response.RenderError(w, fmt.Errorf("failed to list dashboards: %w", err), http.StatusInternalServerError)
+			return
 		}
 
-		response.RenderJSON(w, dashboards)
+		pagination.Total = len(dashboards)
+		dashboardCollection := NewDashboardListCollection(dashboards, pagination)
+		response.RenderJSON(w, dashboardCollection)
 	}
 }
 
@@ -149,6 +146,11 @@ func newDashboardGetHandler(dashboardRepo dashboard.Repository, logger *slog.Log
 		if err != nil {
 			logger.Error("Failed to get dashboard by ID", "id", dashboardID, "error", err)
 			response.RenderError(w, fmt.Errorf("failed to get dashboard: %w", err), http.StatusInternalServerError)
+			return
+		}
+
+		if dashboard == nil {
+			response.RenderError(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
 			return
 		}
 
@@ -199,4 +201,49 @@ func newDashboardRepository(config *DashboardAppConfig, logger *slog.Logger) (da
 	}
 
 	return repo, nil
+}
+
+type DashboardCollection struct {
+	Dashboards []*DashboardListIem `json:"dashboards"`
+	Pagination response.Pagination `json:"pagination"`
+}
+
+type DashboardListIem struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	StationID    string `json:"station_id"`
+	LanguageCode string `json:"language_code"`
+	Timezone     string `json:"timezone"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
+func mapDashboardToListItem(d *dashboard.Dashboard) *DashboardListIem {
+	if d == nil {
+		return nil
+	}
+
+	return &DashboardListIem{
+		ID:           d.ID,
+		Name:         d.Name,
+		Description:  d.Description,
+		StationID:    d.Station.ID,
+		LanguageCode: d.LanguageCode,
+		Timezone:     d.Timezone,
+		CreatedAt:    d.CreatedAt,
+		UpdatedAt:    d.UpdatedAt,
+	}
+}
+
+func NewDashboardListCollection(dashboards []*dashboard.Dashboard, pagination response.Pagination) *DashboardCollection {
+	items := make([]*DashboardListIem, 0, len(dashboards))
+	for _, d := range dashboards {
+		items = append(items, mapDashboardToListItem(d))
+	}
+
+	return &DashboardCollection{
+		Dashboards: items,
+		Pagination: pagination,
+	}
 }

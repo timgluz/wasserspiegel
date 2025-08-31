@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/spinframework/spin-go-sdk/v2/kv"
+	"github.com/timgluz/wasserspiegel/measurement"
 )
 
 var (
@@ -57,6 +58,51 @@ func (r *SpinKVRepository) Close() error {
 }
 
 // -- Repository interface implementation --
+func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) ([]*Dashboard, error) {
+	defer ctx.Done()
+
+	if !r.IsReady() {
+		return nil, ErrKVStoreNotAvailable
+	}
+
+	if limit <= 0 {
+		limit = 100 // Default limit
+	}
+	if offset < 0 {
+		offset = 0 // Default offset
+	}
+
+	keys, err := r.db.GetKeys()
+	if err != nil {
+		r.logger.Error("Failed to retrieve keys from Spin KV store", "error", err)
+		return nil, err
+	}
+
+	until := offset + limit
+	if until > len(keys) {
+		until = len(keys)
+	}
+
+	var dashboards []*Dashboard
+	for _, key := range keys[offset:until] {
+		dashboard, err := r.GetByID(ctx, key)
+		if err != nil {
+			r.logger.Error("Failed to get dashboard by key", "key", key, "error", err)
+			continue
+		}
+
+		if dashboard == nil {
+			r.logger.Warn("Dashboard not found for key", "key", key)
+			continue
+		}
+
+		dashboards = append(dashboards, dashboard)
+	}
+
+	r.logger.Debug("Listed dashboards from Spin KV store", "count", len(dashboards), "offset", offset, "limit", limit)
+	return dashboards, nil
+}
+
 func (r *SpinKVRepository) GetByID(ctx context.Context, id string) (*Dashboard, error) {
 	defer ctx.Done()
 
@@ -96,6 +142,19 @@ func (r *SpinKVRepository) Add(ctx context.Context, dashboard *Dashboard) error 
 		return fmt.Errorf("dashboard cannot be nil")
 	}
 
+	if dashboard.ID == "" {
+		r.logger.Debug("Dashboard ID is empty, generating a new ID")
+		if id, err := GenerateDashboardID(dashboard); err != nil {
+			r.logger.Error("Failed to generate dashboard ID", "error", err)
+			return fmt.Errorf("failed to generate dashboard ID: %w", err)
+		} else {
+			dashboard.ID = id
+		}
+	}
+
+	dashboard.CreatedAt = measurement.CurrentUnix()
+	dashboard.UpdatedAt = dashboard.CreatedAt
+
 	jsonBlob, err := json.Marshal(dashboard)
 	if err != nil {
 		r.logger.Error("Failed to marshal dashboard", "error", err)
@@ -133,6 +192,8 @@ func (r *SpinKVRepository) Update(ctx context.Context, dashboard *Dashboard) err
 		dashboard.Merge(existingDashboard) // Merge existing dashboard with the new one
 	}
 
+	dashboard.UpdatedAt = measurement.CurrentUnix()
+
 	jsonBlob, err := json.Marshal(dashboard)
 	if err != nil {
 		r.logger.Error("Failed to marshal dashboard", "error", err)
@@ -150,13 +211,13 @@ func (r *SpinKVRepository) Update(ctx context.Context, dashboard *Dashboard) err
 
 func (r *SpinKVRepository) Delete(ctx context.Context, id string) error {
 	defer ctx.Done()
+	if id == "" {
+		r.logger.Warn("Cannot delete dashboard: ID is empty")
+		return nil
+	}
 
 	if !r.IsReady() {
 		return ErrKVStoreNotAvailable
-	}
-
-	if id == "" {
-		return fmt.Errorf("dashboard ID cannot be empty")
 	}
 
 	if err := r.db.Delete(id); err != nil {
