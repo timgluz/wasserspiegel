@@ -198,7 +198,7 @@ func newStationsHandler(appComponents *stationAppComponent) spinhttp.RouterHandl
 			return
 		}
 
-		if stationCollection == nil || len(stationCollection.Stations) == 0 {
+		if stationCollection == nil {
 			logger.Warn("No stations found in the collection")
 			response.RenderError(w, ErrNotFound, http.StatusNotFound)
 			return
