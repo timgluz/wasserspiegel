@@ -35,6 +35,16 @@ func (t *StationWaterLevelCollector) Run(ctx context.Context, stationID string, 
 		return err
 	}
 
+	if stationDetails == nil {
+		t.logger.Error("Station not found", "stationID", stationID)
+		return fmt.Errorf("station not found: %s", stationID)
+	}
+
+	if stationDetails.IsDisabled {
+		t.logger.Info("Station is disabled, skipping water level collection", "stationID", stationID)
+		return nil
+	}
+
 	pegelOnlineID, ok := stationDetails.GetPegelOnlineID()
 	if !ok || pegelOnlineID == "" {
 		t.logger.Error("Station does not have a valid PegelOnline ID", "stationID", stationID)

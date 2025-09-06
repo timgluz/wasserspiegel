@@ -24,6 +24,7 @@ type Config struct {
 
 	Period         string
 	RequestTimeout time.Duration
+	TaskTimeout    time.Duration
 }
 
 func main() {
@@ -45,21 +46,13 @@ func main() {
 		config.RequestTimeout = 10 // default to 10 seconds
 	}
 
+	startTime := time.Now()
 	if err := triggerAllStationsMeasurement(config); err != nil {
 		fmt.Printf("Error triggering measurements for all stations: %v\n", err)
 		os.Exit(1)
 	}
 
-	// TODO: collect stationID from args or pull from API
-	/*
-		stationID := "rhein-mannheim"
-		if err := triggerMeasurementTask(httpClient, config, stationID); err != nil {
-			fmt.Printf("Error triggering measurement: %v\n", err)
-			os.Exit(1)
-		}
-	*/
-
-	fmt.Println("Measurement triggered successfully.")
+	fmt.Printf("Measurement collection took %f seconds.\n", time.Since(startTime).Seconds())
 }
 
 func triggerAllStationsMeasurement(config *Config) error {
@@ -76,12 +69,14 @@ func triggerAllStationsMeasurement(config *Config) error {
 	ctx := context.Background()
 	stationCh, errCh := station.StreamStations(ctx, stationRepository, 0, 0)
 	if stationCh == nil || errCh == nil {
-		fmt.Println("Failed to initialize station iterator.")
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize station iterator")
+	}
+
+	taskClient := &http.Client{
+		Timeout: config.TaskTimeout * time.Second,
 	}
 
 	defer ctx.Done()
-
 	var stationCount int
 	for {
 		select {
@@ -91,7 +86,17 @@ func triggerAllStationsMeasurement(config *Config) error {
 				stationCh = nil
 				continue
 			}
+
+			if station.IsDisabled {
+				fmt.Printf("Station %s is disabled, skipping measurement trigger.\n", station.ID)
+				continue
+			}
+
 			fmt.Printf("Found station: ID=%s, Name=%s\n", station.ID, station.Name)
+			if err := triggerMeasurementTask(taskClient, config, station.ID); err != nil {
+				fmt.Printf("Error triggering measurement for station %s: %v\n", station.ID, err)
+				continue
+			}
 			stationCount++
 		case err, ok := <-errCh:
 			if !ok {
@@ -118,8 +123,7 @@ func triggerAllStationsMeasurement(config *Config) error {
 		return nil
 	}
 
-	fmt.Printf("Triggering measurement for %d stations...\n", stationCount)
-
+	fmt.Printf("Successfully triggered measurement for %d stations.\n", stationCount)
 	return nil
 }
 
@@ -140,9 +144,12 @@ func loadConfigFromEnv() (*Config, error) {
 	}
 
 	return &Config{
-		APIEndpoint: apiEndpoint,
-		APIKey:      apiKey,
-		TaskAPIPath: taskAPIPath,
+		APIEndpoint:    apiEndpoint,
+		APIKey:         apiKey,
+		TaskAPIPath:    taskAPIPath,
+		RequestTimeout: 10, // default to 10 seconds
+		TaskTimeout:    30, // default to 30 seconds
+		Period:         os.Getenv("WS_MEASUREMENT_PERIOD"),
 	}, nil
 }
 

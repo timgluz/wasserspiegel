@@ -15,6 +15,8 @@ type Station struct {
 
 	Location    Location     `json:"location"`
 	ExternalIDs []ExternalID `json:"external_ids,omitempty"`
+
+	IsDisabled bool `json:"is_disabled"` // indicates if the station is disabled (not in use)
 }
 
 func (s Station) GetExternalID(name string) (string, bool) {
