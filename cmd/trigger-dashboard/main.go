@@ -8,6 +8,9 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/timgluz/wasserspiegel/dashboard"
+	"github.com/timgluz/wasserspiegel/task"
 )
 
 const DefaultTaskAPIPath = "/tasks/buildDashboard"
@@ -29,9 +32,8 @@ func main() {
 		return
 	}
 
-	stationID := "rhein-mannheim"
-	if err := triggerDashboardBuild(config, stationID); err != nil {
-		fmt.Printf("Error triggering dashboard build: %v\n", err)
+	if err := triggerAllDashboardBuilds(config); err != nil {
+		fmt.Printf("Error triggering dashboard builds: %v\n", err)
 		return
 	}
 
@@ -51,7 +53,7 @@ func loadConfigFromEnv() (*Config, error) {
 
 	taskAPIPath := os.Getenv("WS_DASHBOARD_TASK_PATH")
 	if taskAPIPath == "" {
-		taskAPIPath = "/tasks/buildDashboard"
+		taskAPIPath = DefaultTaskAPIPath
 	}
 
 	return &Config{
@@ -63,12 +65,84 @@ func loadConfigFromEnv() (*Config, error) {
 	}, nil
 }
 
-func triggerDashboardBuild(config *Config, stationID string) error {
-	// Dummy implementation for illustration purposes
-	fmt.Printf("Triggering dashboard build for %s at %s%s\n", stationID, config.APIEndpoint, config.TaskAPIPath)
+func triggerAllDashboardBuilds(config *Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.RequestTimeout)*time.Second)
+	defer cancel()
 
 	httpClient := &http.Client{
 		Timeout: time.Duration(config.RequestTimeout) * time.Second,
+	}
+
+	dashboardRepository := dashboard.NewAPIRepository(httpClient, config.APIEndpoint, config.APIKey)
+	dashboardCh, errCh := dashboard.StreamDashboards(ctx, dashboardRepository, 0, 100)
+	if dashboardCh == nil && errCh == nil {
+		return fmt.Errorf("no dashboards found")
+	}
+
+	for {
+		select {
+		case dashboard, ok := <-dashboardCh:
+			if !ok {
+				dashboardCh = nil
+				continue
+			}
+
+			fmt.Printf("Processing dashboard ID: %s, StationID: %s\n", dashboard.ID, dashboard.StationID)
+
+			builderOptions, ok := mapToDashboardBuilderOptions(dashboard)
+			if !ok {
+				fmt.Printf("Skipping dashboard %s due to missing builder options\n", dashboard.ID)
+				continue
+			}
+
+			if err := triggerDashboardBuild(config, builderOptions); err != nil {
+				fmt.Printf("Error triggering dashboard build for %s: %v\n", dashboard.ID, err)
+				continue
+			}
+
+		case err, ok := <-errCh:
+			if !ok {
+				errCh = nil
+				continue
+			}
+			return fmt.Errorf("error iterating dashboards: %v", err)
+		case <-ctx.Done():
+			fmt.Println("context cancelled, stopping iteration")
+
+			return nil
+		default:
+			// No operation, just to avoid blocking
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if dashboardCh == nil && errCh == nil {
+			break
+		}
+	}
+
+	fmt.Println("Completed processing all dashboards.")
+
+	return nil
+}
+
+func mapToDashboardBuilderOptions(dashboardItem dashboard.ListItem) (task.DashboardBuilderOptions, bool) {
+	return task.DashboardBuilderOptions{
+		StationID:    dashboardItem.StationID,
+		LanguageCode: dashboardItem.LanguageCode,
+		Timezone:     dashboardItem.Timezone,
+	}, true
+}
+
+func triggerDashboardBuild(config *Config, opts task.DashboardBuilderOptions) error {
+	stationID := opts.StationID
+	if stationID == "" {
+		return fmt.Errorf("empty station ID")
+	}
+
+	fmt.Printf("Triggering dashboard build for %s at %s%s\n", stationID, config.APIEndpoint, config.TaskAPIPath)
+
+	httpClient := &http.Client{
+		Timeout: time.Duration(config.TaskTimeout) * time.Second,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.TaskTimeout)*time.Second)
@@ -89,8 +163,8 @@ func triggerDashboardBuild(config *Config, stationID string) error {
 
 	q := req.URL.Query()
 	q.Add("station_id", stationID)
-	q.Add("language_code", "en")
-	q.Add("timezone", "utc")
+	q.Add("language_code", opts.LanguageCode)
+	q.Add("timezone", opts.Timezone)
 	req.URL.RawQuery = q.Encode()
 
 	resp, err := httpClient.Do(req)

@@ -1,3 +1,5 @@
+//go:build tinygo || wasm
+
 package dashboard
 
 import (
@@ -8,10 +10,7 @@ import (
 
 	"github.com/spinframework/spin-go-sdk/v2/kv"
 	"github.com/timgluz/wasserspiegel/measurement"
-)
-
-var (
-	ErrKVStoreNotAvailable = fmt.Errorf("Spin KV store is not available")
+	"github.com/timgluz/wasserspiegel/response"
 )
 
 type SpinKVRepository struct {
@@ -58,7 +57,7 @@ func (r *SpinKVRepository) Close() error {
 }
 
 // -- Repository interface implementation --
-func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) ([]*Dashboard, error) {
+func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) (*Collection, error) {
 	defer ctx.Done()
 
 	if !r.IsReady() {
@@ -78,12 +77,17 @@ func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) ([]*
 		return nil, err
 	}
 
+	if offset >= len(keys) {
+		r.logger.Debug("Offset exceeds total number of dashboards", "offset", offset, "total", len(keys))
+		return nil, nil
+	}
+
 	until := offset + limit
 	if until > len(keys) {
 		until = len(keys)
 	}
 
-	var dashboards []*Dashboard
+	var dashboards []Dashboard
 	for _, key := range keys[offset:until] {
 		dashboard, err := r.GetByID(ctx, key)
 		if err != nil {
@@ -96,11 +100,17 @@ func (r *SpinKVRepository) List(ctx context.Context, offset int, limit int) ([]*
 			continue
 		}
 
-		dashboards = append(dashboards, dashboard)
+		dashboards = append(dashboards, *dashboard)
 	}
 
 	r.logger.Debug("Listed dashboards from Spin KV store", "count", len(dashboards), "offset", offset, "limit", limit)
-	return dashboards, nil
+	pagination := response.Pagination{
+		Limit:  limit,
+		Offset: offset,
+		Total:  len(keys),
+	}
+	collection := NewDashboardListCollection(dashboards, pagination)
+	return collection, nil
 }
 
 func (r *SpinKVRepository) GetByID(ctx context.Context, id string) (*Dashboard, error) {

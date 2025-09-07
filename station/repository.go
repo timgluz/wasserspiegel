@@ -16,6 +16,7 @@ type Pagination struct {
 	Offset int `json:"offset"`
 }
 
+// fix: return slice of pointers to Station, like Dashboard repo
 type Repository interface {
 	List(ctx context.Context, offset int, limit int) (*StationCollection, error)
 

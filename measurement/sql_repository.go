@@ -1,3 +1,5 @@
+//go:build tinygo || wasm
+
 package measurement
 
 import (
@@ -7,10 +9,6 @@ import (
 	"log/slog"
 
 	"github.com/spinframework/spin-go-sdk/v2/sqlite"
-)
-
-var (
-	ErrDBNotAvailable = fmt.Errorf("SQLite DB is not available")
 )
 
 type SQLRepository struct {

@@ -115,15 +115,13 @@ func newDashboardIndexHandler(dashboardRepo dashboard.Repository, logger *slog.L
 	return func(w http.ResponseWriter, r *http.Request, params spinhttp.Params) {
 		pagination := response.NewPaginationFromRequest(r)
 		logger.Info("Handling dashboard index request", "limit", pagination.Limit, "offset", pagination.Offset)
-		dashboards, err := dashboardRepo.List(r.Context(), pagination.Offset, pagination.Limit)
+		dashboardCollection, err := dashboardRepo.List(r.Context(), pagination.Offset, pagination.Limit)
 		if err != nil {
 			logger.Error("Failed to list dashboards", "error", err)
 			response.RenderError(w, fmt.Errorf("failed to list dashboards: %w", err), http.StatusInternalServerError)
 			return
 		}
 
-		pagination.Total = len(dashboards)
-		dashboardCollection := NewDashboardListCollection(dashboards, pagination)
 		response.RenderJSON(w, dashboardCollection)
 	}
 }
@@ -201,49 +199,4 @@ func newDashboardRepository(config *DashboardAppConfig, logger *slog.Logger) (da
 	}
 
 	return repo, nil
-}
-
-type DashboardCollection struct {
-	Dashboards []*DashboardListIem `json:"dashboards"`
-	Pagination response.Pagination `json:"pagination"`
-}
-
-type DashboardListIem struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	StationID    string `json:"station_id"`
-	LanguageCode string `json:"language_code"`
-	Timezone     string `json:"timezone"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
-}
-
-func mapDashboardToListItem(d *dashboard.Dashboard) *DashboardListIem {
-	if d == nil {
-		return nil
-	}
-
-	return &DashboardListIem{
-		ID:           d.ID,
-		Name:         d.Name,
-		Description:  d.Description,
-		StationID:    d.Station.ID,
-		LanguageCode: d.LanguageCode,
-		Timezone:     d.Timezone,
-		CreatedAt:    d.CreatedAt,
-		UpdatedAt:    d.UpdatedAt,
-	}
-}
-
-func NewDashboardListCollection(dashboards []*dashboard.Dashboard, pagination response.Pagination) *DashboardCollection {
-	items := make([]*DashboardListIem, 0, len(dashboards))
-	for _, d := range dashboards {
-		items = append(items, mapDashboardToListItem(d))
-	}
-
-	return &DashboardCollection{
-		Dashboards: items,
-		Pagination: pagination,
-	}
 }
