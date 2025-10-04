@@ -1,6 +1,6 @@
 module github.com/timgluz/wasserspiegel
 
-go 1.24
+go 1.25.1
 
 require (
 	github.com/gosimple/slug v1.15.0

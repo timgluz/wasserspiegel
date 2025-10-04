@@ -52,7 +52,6 @@ func (t *StationWaterLevelCollector) Run(ctx context.Context, stationID string, 
 	}
 
 	// Fetch the water level data from the provider
-	// TODO: use smaller period or use period from database
 	t.logger.Debug("Fetching water levels from provider", "pegelOnlineID", pegelOnlineID, "stationID", stationID)
 	waterLevels, err := t.stationProvider.GetStationWaterLevel(ctx, pegelOnlineID)
 	if err != nil {

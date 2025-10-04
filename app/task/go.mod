@@ -1,8 +1,6 @@
 module github.com/timgluz/wasserspiegel/search
 
-go 1.24
-
-toolchain go1.24.5
+go 1.25.1
 
 require (
 	github.com/spinframework/spin-go-sdk/v2 v2.2.1
